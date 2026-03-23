@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+*.egg-info/
+dist/
+build/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Data files (large)
+*.zip
+*.xlsx
+*.xls
+*.csv
+*.pkl
+*.png
+*.html
+*.txt
+
+# Data folders
+*节点电价*
+*日前*
+*实时*
+*用电侧*
+*一键导出*
