@@ -3,7 +3,7 @@ import { Card, DatePicker, Button, Row, Col, Select } from 'antd'
 import { SearchOutlined, DownloadOutlined } from '@ant-design/icons'
 import ReactECharts from 'echarts-for-react'
 import dayjs from 'dayjs'
-import marketData from '../data/market_data.json'
+import marketData from '../src/data/market_data.json'
 
 interface MarketData {
   dates: string[]

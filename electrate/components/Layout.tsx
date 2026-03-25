@@ -27,6 +27,7 @@ const menuItems = [
     icon: <HomeOutlined />,
     label: '首页',
   },
+  // 保留：天气模块
   {
     key: 'weather',
     icon: <CloudOutlined />,
@@ -38,65 +39,68 @@ const menuItems = [
       { key: '/weather/daily-predict', label: '逐日预测' },
     ],
   },
+  // 优化：现货数据按维度分类
   {
     key: 'spot',
     icon: <ThunderboltOutlined />,
-    label: '现货预测',
-    children: [
-      { key: '/data-show', label: '现货预测总览' },
-      { key: '/windpower', label: '省级风电预测' },
-      { key: '/solarpower', label: '省级光伏预测' },
-      { key: '/loadpower', label: '省级负荷预测' },
-      { key: '/loadprice', label: '省级电价预测' },
-    ],
-  },
-  {
-    key: 'data',
-    icon: <DatabaseOutlined />,
     label: '现货数据',
     children: [
-      { key: '/spot-data', label: '现货历史数据' },
+      { key: '/price-overview', label: '电价总览' },
+      { key: '/data-show', label: '数据总览' },
+      { key: '/spot-data', label: '历史数据查询' },
+      { key: '/loadprice', label: '电价分析' },
+      { key: '/loadpower', label: '负荷分析' },
+      { key: '/windpower', label: '风电分析' },
+      { key: '/solarpower', label: '光伏分析' },
     ],
   },
+  // 保留：售电业务
   {
     key: 'sales',
     icon: <ShopOutlined />,
     label: '售电业务',
   },
+  // 保留：发电管理
   {
     key: 'generation',
     icon: <ThunderboltOutlined />,
     label: '发电管理',
   },
+  // 保留：电力用户
   {
     key: 'users',
     icon: <UserOutlined />,
     label: '电力用户',
   },
+  // 保留：决策模块
   {
     key: 'decision',
     icon: <PieChartOutlined />,
-    label: '售电决策',
+    label: '辅助决策',
     children: [
-      { key: '/sales-decision', label: '售电辅助决策' },
-      { key: '/scroll-decision', label: '滚撮辅助决策' },
+      { key: '/sales-decision', label: '售电决策' },
+      { key: '/scroll-decision', label: '滚撮决策' },
     ],
   },
+  // 保留：储能管理
   {
     key: 'storage',
     icon: <ThunderboltOutlined />,
     label: '储能管理',
   },
+  // 保留：光伏管理
   {
     key: 'solar',
     icon: <SunOutlined />,
     label: '光伏管理',
   },
+  // 保留：管理与分析
   {
     key: 'analysis',
     icon: <BarChartOutlined />,
     label: '管理与分析',
   },
+  // 保留：个人中心
   {
     key: '/user',
     icon: <SettingOutlined />,
@@ -106,6 +110,7 @@ const menuItems = [
 
 const topNavItems = [
   { key: '/', label: '首页' },
+  { key: '/price-overview', label: '电价总览' },
   { key: '/weather/predict', label: '气象预测' },
   { key: '/weather/alert', label: '气象预警' },
   { key: '/weather/nwp', label: '数值预测' },

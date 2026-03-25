@@ -14,6 +14,7 @@ build/
 *.db
 *.sqlite
 *.sqlite3
+!power-data/power_market_v2.db
 
 # IDE
 .vscode/
@@ -37,6 +38,9 @@ Thumbs.db
 *.png
 *.html
 *.txt
+
+# Allow model output charts
+!power-data/*.png
 
 # Data folders
 *节点电价*
