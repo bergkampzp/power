@@ -1,173 +1,168 @@
-import { useState } from 'react'
-import { Card, Checkbox, Button, Row, Col, Table } from 'antd'
+import { useState, useEffect } from 'react'
+import { Card, Checkbox, Button, Row, Col, DatePicker, Spin, Empty, Table } from 'antd'
 import { SearchOutlined } from '@ant-design/icons'
 import ReactECharts from 'echarts-for-react'
+import dayjs from 'dayjs'
 
-const cities = [
-  '南京', '无锡', '徐州', '常州', '苏州', '南通',
-  '连云港', '淮安', '盐城', '扬州', '镇江', '泰州', '宿迁'
+const CITIES = ['昆明', '曲靖', '玉溪', '保山', '昭通', '丽江', '普洱', '临沧',
+                '楚雄', '红河', '文山', '西双版纳', '大理', '德宏', '怒江', '迪庆']
+
+const CITY_COLORS = [
+  '#f5222d', '#fa541c', '#fa8c16', '#faad14', '#fadb14', '#a0d911',
+  '#52c41a', '#13c2c2', '#1890ff', '#2f54eb', '#722ed1', '#eb2f96',
+  '#ff85c0', '#ffd666', '#95de64', '#5cdbd3',
 ]
 
-const mockData = [
-  { time: '2026-03-12 12:00', temp: 14, weather: '晴', windDir360: 48, windDir: '东北风', windLevel: 2, windSpeed: 9 },
-  { time: '2026-03-12 13:00', temp: 15, weather: '晴', windDir360: 43, windDir: '东北风', windLevel: 2, windSpeed: 9 },
-  { time: '2026-03-12 14:00', temp: 16, weather: '晴', windDir360: 38, windDir: '东北风', windLevel: 2, windSpeed: 10 },
-  { time: '2026-03-12 15:00', temp: 16, weather: '晴', windDir360: 35, windDir: '东北风', windLevel: 2, windSpeed: 10 },
-  { time: '2026-03-12 16:00', temp: 15, weather: '晴', windDir360: 40, windDir: '东北风', windLevel: 2, windSpeed: 9 },
-  { time: '2026-03-12 17:00', temp: 14, weather: '晴', windDir360: 45, windDir: '东北风', windLevel: 2, windSpeed: 8 },
-  { time: '2026-03-12 18:00', temp: 12, weather: '晴', windDir360: 50, windDir: '东北风', windLevel: 1, windSpeed: 7 },
-  { time: '2026-03-12 19:00', temp: 11, weather: '晴', windDir360: 55, windDir: '东北偏东风', windLevel: 1, windSpeed: 6 },
-  { time: '2026-03-12 20:00', temp: 10, weather: '晴', windDir360: 60, windDir: '东北偏东风', windLevel: 1, windSpeed: 6 },
-  { time: '2026-03-12 21:00', temp: 9, weather: '晴', windDir360: 65, windDir: '东北偏东风', windLevel: 1, windSpeed: 6 },
-  { time: '2026-03-12 22:00', temp: 9, weather: '晴', windDir360: 70, windDir: '东北偏东风', windLevel: 2, windSpeed: 7 },
-  { time: '2026-03-12 23:00', temp: 8, weather: '晴', windDir360: 75, windDir: '东北偏东风', windLevel: 2, windSpeed: 7 },
-]
-
-const columns = [
-  { title: '预报时间', dataIndex: 'time', key: 'time', width: 160 },
-  { title: '温度(°C)', dataIndex: 'temp', key: 'temp', width: 100 },
-  { title: '天气状况', dataIndex: 'weather', key: 'weather', width: 100 },
-  { title: '风向360角度', dataIndex: 'windDir360', key: 'windDir360', width: 120 },
-  { title: '风向', dataIndex: 'windDir', key: 'windDir', width: 120 },
-  { title: '风力等级', dataIndex: 'windLevel', key: 'windLevel', width: 100 },
-  { title: '风速(km/h)', dataIndex: 'windSpeed', key: 'windSpeed', width: 120 },
-]
+type HourlyRecord = {
+  city: string; date: string; hour: number
+  temp: number | null; humidity: number | null
+  wind_speed: number | null; wind_360: number | null
+  precip: number | null; cloud: number | null
+}
 
 export default function WeatherPredict() {
-  const [selectedCities, setSelectedCities] = useState<string[]>(['南京'])
+  const [selectedCities, setSelectedCities] = useState<string[]>(['昆明'])
+  const [selectedDate, setSelectedDate] = useState(dayjs('2026-03-20'))
+  const [data, setData] = useState<HourlyRecord[]>([])
+  const [loading, setLoading] = useState(false)
 
-  const handleCityChange = (city: string, checked: boolean) => {
-    if (checked) {
-      setSelectedCities([...selectedCities, city])
-    } else {
-      setSelectedCities(selectedCities.filter(c => c !== city))
+  const fetchData = async () => {
+    if (selectedCities.length === 0) return
+    setLoading(true)
+    try {
+      const dateStr = selectedDate.format('YYYYMMDD')
+      const res = await fetch(`/api/weather/hourly?date=${dateStr}`)
+      const json = await res.json()
+      if (json.success) {
+        setData((json.data as HourlyRecord[]).filter(d => selectedCities.includes(d.city)))
+      }
+    } finally {
+      setLoading(false)
     }
   }
 
-  const chartOption = {
+  useEffect(() => { fetchData() }, [])
+
+  const handleCityChange = (city: string, checked: boolean) =>
+    setSelectedCities(checked ? [...selectedCities, city] : selectedCities.filter(c => c !== city))
+
+  const hours = Array.from({ length: 24 }, (_, i) => i)
+  const byCity: Record<string, HourlyRecord[]> = {}
+  selectedCities.forEach(c => { byCity[c] = [] })
+  data.forEach(d => { if (byCity[d.city]) byCity[d.city].push(d) })
+
+  const tempOption = {
     backgroundColor: 'transparent',
-    tooltip: {
-      trigger: 'axis',
-      backgroundColor: '#2a2a2a',
-      borderColor: '#434343',
-      textStyle: { color: '#fff' }
-    },
-    legend: {
-      data: ['温度', '风速', '风向'],
-      textStyle: { color: '#999' },
-      top: 10
-    },
-    grid: {
-      left: '3%',
-      right: '4%',
-      bottom: '3%',
-      containLabel: true
-    },
-    xAxis: {
-      type: 'category',
-      data: mockData.map(d => d.time.split(' ')[1]),
-      axisLine: { lineStyle: { color: '#434343' } },
-      axisLabel: { color: '#999' }
-    },
-    yAxis: [
-      {
-        type: 'value',
-        name: '温度(°C)',
-        axisLine: { lineStyle: { color: '#434343' } },
-        axisLabel: { color: '#999' },
-        splitLine: { lineStyle: { color: '#303030' } }
-      },
-      {
-        type: 'value',
-        name: '风速(km/h)',
-        axisLine: { lineStyle: { color: '#434343' } },
-        axisLabel: { color: '#999' },
-        splitLine: { show: false }
-      }
-    ],
-    series: [
-      {
-        name: '温度',
-        type: 'line',
-        data: mockData.map(d => d.temp),
-        smooth: true,
-        itemStyle: { color: '#ff4d4f' },
-        areaStyle: {
-          color: {
-            type: 'linear',
-            x: 0, y: 0, x2: 0, y2: 1,
-            colorStops: [
-              { offset: 0, color: 'rgba(255, 77, 79, 0.3)' },
-              { offset: 1, color: 'rgba(255, 77, 79, 0.05)' }
-            ]
-          }
-        }
-      },
-      {
-        name: '风速',
-        type: 'line',
-        yAxisIndex: 1,
-        data: mockData.map(d => d.windSpeed),
-        smooth: true,
-        itemStyle: { color: '#1E88E5' }
-      },
-      {
-        name: '风向',
-        type: 'scatter',
-        yAxisIndex: 1,
-        data: mockData.map(d => d.windDir360 / 10),
-        itemStyle: { color: '#52c41a' }
-      }
-    ]
+    tooltip: { trigger: 'axis', backgroundColor: '#2a2a2a', borderColor: '#434343', textStyle: { color: '#fff' } },
+    legend: { data: selectedCities, textStyle: { color: '#999' }, top: 4, type: 'scroll' },
+    grid: { left: '3%', right: '4%', bottom: '10%', top: 48, containLabel: true },
+    xAxis: { type: 'category', data: hours.map(h => `${String(h).padStart(2,'0')}:00`), axisLine: { lineStyle: { color: '#434343' } }, axisLabel: { color: '#999', interval: 2 } },
+    yAxis: { type: 'value', name: '°C', nameTextStyle: { color: '#999' }, axisLine: { lineStyle: { color: '#434343' } }, axisLabel: { color: '#999' }, splitLine: { lineStyle: { color: '#303030' } } },
+    series: selectedCities.map((city, i) => ({
+      name: city,
+      type: 'line',
+      smooth: true,
+      showSymbol: false,
+      data: hours.map(h => byCity[city]?.find(r => r.hour === h)?.temp ?? null),
+      itemStyle: { color: CITY_COLORS[i % CITY_COLORS.length] },
+      lineStyle: { color: CITY_COLORS[i % CITY_COLORS.length], width: 2 },
+      areaStyle: selectedCities.length === 1 ? {
+        color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: CITY_COLORS[i % CITY_COLORS.length] + '40' }, { offset: 1, color: CITY_COLORS[i % CITY_COLORS.length] + '05' }] }
+      } : undefined,
+    })),
   }
+
+  const windOption = {
+    backgroundColor: 'transparent',
+    tooltip: { trigger: 'axis', backgroundColor: '#2a2a2a', borderColor: '#434343', textStyle: { color: '#fff' } },
+    legend: { data: selectedCities, textStyle: { color: '#999' }, top: 4, type: 'scroll' },
+    grid: { left: '3%', right: '4%', bottom: '10%', top: 48, containLabel: true },
+    xAxis: { type: 'category', data: hours.map(h => `${String(h).padStart(2,'0')}:00`), axisLine: { lineStyle: { color: '#434343' } }, axisLabel: { color: '#999', interval: 2 } },
+    yAxis: { type: 'value', name: 'm/s', nameTextStyle: { color: '#999' }, axisLine: { lineStyle: { color: '#434343' } }, axisLabel: { color: '#999' }, splitLine: { lineStyle: { color: '#303030' } } },
+    series: selectedCities.map((city, i) => ({
+      name: city,
+      type: 'line',
+      smooth: true,
+      showSymbol: false,
+      data: hours.map(h => byCity[city]?.find(r => r.hour === h)?.wind_speed ?? null),
+      itemStyle: { color: CITY_COLORS[i % CITY_COLORS.length] },
+      lineStyle: { color: CITY_COLORS[i % CITY_COLORS.length], width: 2 },
+    })),
+  }
+
+  // 表格：仅展示第一个选中城市的逐小时数据
+  const tableCity = selectedCities[0]
+  const tableData = byCity[tableCity] || []
+  const columns = [
+    { title: '时间', dataIndex: 'hour', key: 'hour', width: 80, render: (h: number) => `${String(h).padStart(2,'0')}:00` },
+    { title: '温度(°C)', dataIndex: 'temp', key: 'temp', width: 100 },
+    { title: '湿度(%)', dataIndex: 'humidity', key: 'humidity', width: 100 },
+    { title: '降水(mm)', dataIndex: 'precip', key: 'precip', width: 100 },
+    { title: '风速(m/s)', dataIndex: 'wind_speed', key: 'wind_speed', width: 110, render: (v: number | null) => v?.toFixed(2) ?? '-' },
+    { title: '风向(°)', dataIndex: 'wind_360', key: 'wind_360', width: 100 },
+    { title: '云量(%)', dataIndex: 'cloud', key: 'cloud', width: 100 },
+  ]
 
   return (
     <div>
       <Card>
-        {/* 工具栏 */}
-        <div style={{ marginBottom: 24 }}>
-          <Row gutter={[16, 16]} align="middle">
+        <div style={{ marginBottom: 16 }}>
+          <Row gutter={[16, 8]} align="middle">
             <Col flex="auto">
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-                {cities.map(city => (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
+                {CITIES.map((city, i) => (
                   <Checkbox
                     key={city}
                     checked={selectedCities.includes(city)}
-                    onChange={(e) => handleCityChange(city, e.target.checked)}
-                  >
-                    {city}
-                  </Checkbox>
+                    onChange={e => handleCityChange(city, e.target.checked)}
+                    style={{ color: CITY_COLORS[i % CITY_COLORS.length] }}
+                  >{city}</Checkbox>
                 ))}
               </div>
             </Col>
           </Row>
-          <Row style={{ marginTop: 16 }}>
+          <Row gutter={16} align="middle" style={{ marginTop: 12 }}>
             <Col>
-              <Button type="primary" icon={<SearchOutlined />}>获取气象预测</Button>
+              <DatePicker
+                value={selectedDate}
+                onChange={d => d && setSelectedDate(d)}
+                format="YYYY-MM-DD"
+              />
+            </Col>
+            <Col>
+              <Button type="primary" icon={<SearchOutlined />} onClick={fetchData} loading={loading}>
+                查询
+              </Button>
             </Col>
           </Row>
         </div>
 
-        {/* 数据表格 */}
-        <div style={{ marginBottom: 24 }}>
-          <h3 style={{ color: '#fff', marginBottom: 16 }}>南京-气象预测信息</h3>
-          <Table
-            columns={columns}
-            dataSource={mockData}
-            pagination={false}
-            size="small"
-            scroll={{ y: 300 }}
-          />
-        </div>
-
-        {/* 图表 */}
-        <div>
-          <h3 style={{ color: '#fff', marginBottom: 16 }}>气象预测图表</h3>
-          <ReactECharts
-            option={chartOption}
-            style={{ height: 350 }}
-          />
-        </div>
+        <Spin spinning={loading}>
+          {data.length === 0 ? <Empty description="暂无数据" style={{ padding: '40px 0' }} /> : (
+            <>
+              <div style={{ marginBottom: 24 }}>
+                <h3 style={{ color: '#fff', marginBottom: 12 }}>逐小时温度（°C）</h3>
+                <ReactECharts option={tempOption} style={{ height: 280 }} />
+              </div>
+              <div style={{ marginBottom: 24 }}>
+                <h3 style={{ color: '#fff', marginBottom: 12 }}>逐小时风速（m/s）</h3>
+                <ReactECharts option={windOption} style={{ height: 240 }} />
+              </div>
+              {tableCity && tableData.length > 0 && (
+                <div>
+                  <h3 style={{ color: '#fff', marginBottom: 12 }}>{tableCity} — 逐小时详情</h3>
+                  <Table
+                    columns={columns}
+                    dataSource={tableData.map(r => ({ ...r, key: r.hour }))}
+                    pagination={false}
+                    size="small"
+                    scroll={{ x: 700, y: 300 }}
+                  />
+                </div>
+              )}
+            </>
+          )}
+        </Spin>
       </Card>
     </div>
   )

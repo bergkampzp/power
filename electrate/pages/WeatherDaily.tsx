@@ -1,143 +1,151 @@
-import { useState } from 'react'
-import { Card, Checkbox, Button, Row, Col } from 'antd'
+import { useState, useEffect } from 'react'
+import { Card, Checkbox, Button, Row, Col, DatePicker, Spin, Empty } from 'antd'
 import { SearchOutlined } from '@ant-design/icons'
 import ReactECharts from 'echarts-for-react'
+import dayjs from 'dayjs'
 
-const cities = [
-  '南京', '无锡', '徐州', '常州', '苏州', '南通',
-  '连云港', '淮安', '盐城', '扬州', '镇江', '泰州', '宿迁'
+const CITIES = ['昆明', '曲靖', '玉溪', '保山', '昭通', '丽江', '普洱', '临沧',
+                '楚雄', '红河', '文山', '西双版纳', '大理', '德宏', '怒江', '迪庆']
+
+const CITY_COLORS = [
+  '#f5222d', '#fa541c', '#fa8c16', '#faad14', '#fadb14', '#a0d911',
+  '#52c41a', '#13c2c2', '#1890ff', '#2f54eb', '#722ed1', '#eb2f96',
+  '#ff85c0', '#ffd666', '#95de64', '#5cdbd3',
 ]
 
-const dailyData = [
-  { date: '2026-03-12', temp: 14, precip: 0 },
-  { date: '2026-03-13', temp: 16, precip: 0 },
-  { date: '2026-03-14', temp: 18, precip: 0 },
-  { date: '2026-03-15', temp: 20, precip: 0 },
-  { date: '2026-03-16', temp: 19, precip: 5 },
-  { date: '2026-03-17', temp: 17, precip: 12 },
-  { date: '2026-03-18', temp: 15, precip: 8 },
-  { date: '2026-04-13', temp: 22, precip: 0 },
-]
+type DailyRecord = {
+  city: string; date: string; temp_max: number; temp_min: number
+  humidity: number; precip: number; wind_speed_max: number; cloud: number
+}
 
 export default function WeatherDaily() {
-  const [selectedCities, setSelectedCities] = useState<string[]>(['南京'])
+  const [selectedCities, setSelectedCities] = useState<string[]>(['昆明', '曲靖', '大理'])
+  const [dateRange, setDateRange] = useState<[dayjs.Dayjs, dayjs.Dayjs]>([
+    dayjs('2026-03-15'), dayjs('2026-03-24')
+  ])
+  const [data, setData] = useState<DailyRecord[]>([])
+  const [loading, setLoading] = useState(false)
 
-  const handleCityChange = (city: string, checked: boolean) => {
-    if (checked) {
-      setSelectedCities([...selectedCities, city])
-    } else {
-      setSelectedCities(selectedCities.filter(c => c !== city))
+  const fetchData = async () => {
+    if (selectedCities.length === 0) return
+    setLoading(true)
+    try {
+      const start = dateRange[0].format('YYYY-MM-DD')
+      const end = dateRange[1].format('YYYY-MM-DD')
+      const res = await fetch(`/api/weather/daily?start_date=${start}&end_date=${end}`)
+      const json = await res.json()
+      if (json.success) {
+        setData((json.data as DailyRecord[]).filter(d => selectedCities.includes(d.city)))
+      }
+    } finally {
+      setLoading(false)
     }
   }
 
-  const chartOption = {
+  useEffect(() => { fetchData() }, [])
+
+  const handleCityChange = (city: string, checked: boolean) =>
+    setSelectedCities(checked ? [...selectedCities, city] : selectedCities.filter(c => c !== city))
+
+  const handleSelectAll = (checked: boolean) =>
+    setSelectedCities(checked ? [...CITIES] : [])
+
+  // 按城市分组
+  const byCity: Record<string, DailyRecord[]> = {}
+  selectedCities.forEach(c => { byCity[c] = [] })
+  data.forEach(d => { if (byCity[d.city]) byCity[d.city].push(d) })
+  const dates = [...new Set(data.map(d => d.date))].sort()
+
+  const tempOption = {
     backgroundColor: 'transparent',
-    tooltip: {
-      trigger: 'axis',
-      backgroundColor: '#2a2a2a',
-      borderColor: '#434343',
-      textStyle: { color: '#fff' }
-    },
-    legend: {
-      data: ['温度(预估)', '降水(≥62 km/h)'],
-      textStyle: { color: '#999' },
-      top: 10
-    },
-    grid: {
-      left: '3%',
-      right: '4%',
-      bottom: '3%',
-      containLabel: true
-    },
-    xAxis: {
-      type: 'category',
-      data: dailyData.map(d => d.date),
-      axisLine: { lineStyle: { color: '#434343' } },
-      axisLabel: { color: '#999' }
-    },
-    yAxis: [
-      {
-        type: 'value',
-        name: '温度(°C)',
-        min: 0,
-        max: 25,
-        axisLine: { lineStyle: { color: '#434343' } },
-        axisLabel: { color: '#999' },
-        splitLine: { lineStyle: { color: '#303030' } }
-      },
-      {
-        type: 'value',
-        name: '降水(mm)',
-        axisLine: { lineStyle: { color: '#434343' } },
-        axisLabel: { color: '#999' },
-        splitLine: { show: false }
-      }
-    ],
-    series: [
-      {
-        name: '温度(预估)',
-        type: 'line',
-        data: dailyData.map(d => d.temp),
-        smooth: true,
-        itemStyle: { color: '#999' },
-        areaStyle: {
-          color: {
-            type: 'linear',
-            x: 0, y: 0, x2: 0, y2: 1,
-            colorStops: [
-              { offset: 0, color: 'rgba(153, 153, 153, 0.3)' },
-              { offset: 1, color: 'rgba(153, 153, 153, 0.05)' }
-            ]
-          }
-        }
-      },
-      {
-        name: '降水(≥62 km/h)',
-        type: 'scatter',
-        yAxisIndex: 1,
-        data: dailyData.map(d => d.precip),
-        symbolSize: 15,
-        itemStyle: { color: '#ff4d4f' }
-      }
-    ]
+    tooltip: { trigger: 'axis', backgroundColor: '#2a2a2a', borderColor: '#434343', textStyle: { color: '#fff' } },
+    legend: { data: selectedCities, textStyle: { color: '#999' }, top: 4, type: 'scroll' },
+    grid: { left: '3%', right: '4%', bottom: '10%', top: 48, containLabel: true },
+    xAxis: { type: 'category', data: dates, axisLine: { lineStyle: { color: '#434343' } }, axisLabel: { color: '#999' } },
+    yAxis: { type: 'value', name: '°C', nameTextStyle: { color: '#999' }, axisLine: { lineStyle: { color: '#434343' } }, axisLabel: { color: '#999' }, splitLine: { lineStyle: { color: '#303030' } } },
+    series: selectedCities.map((city, i) => ({
+      name: city,
+      type: 'line',
+      smooth: true,
+      showSymbol: true,
+      symbolSize: 6,
+      data: dates.map(d => byCity[city]?.find(r => r.date === d)?.temp_max ?? null),
+      itemStyle: { color: CITY_COLORS[i % CITY_COLORS.length] },
+      lineStyle: { color: CITY_COLORS[i % CITY_COLORS.length] },
+    })),
+  }
+
+  const precipOption = {
+    backgroundColor: 'transparent',
+    tooltip: { trigger: 'axis', backgroundColor: '#2a2a2a', borderColor: '#434343', textStyle: { color: '#fff' } },
+    legend: { data: selectedCities, textStyle: { color: '#999' }, top: 4, type: 'scroll' },
+    grid: { left: '3%', right: '4%', bottom: '10%', top: 48, containLabel: true },
+    xAxis: { type: 'category', data: dates, axisLine: { lineStyle: { color: '#434343' } }, axisLabel: { color: '#999' } },
+    yAxis: { type: 'value', name: 'mm', nameTextStyle: { color: '#999' }, axisLine: { lineStyle: { color: '#434343' } }, axisLabel: { color: '#999' }, splitLine: { lineStyle: { color: '#303030' } } },
+    series: selectedCities.map((city, i) => ({
+      name: city,
+      type: 'bar',
+      stack: undefined,
+      data: dates.map(d => byCity[city]?.find(r => r.date === d)?.precip ?? null),
+      itemStyle: { color: CITY_COLORS[i % CITY_COLORS.length] },
+    })),
   }
 
   return (
     <div>
       <Card>
-        {/* 工具栏 */}
-        <div style={{ marginBottom: 24 }}>
-          <Row gutter={[16, 16]} align="middle">
+        <div style={{ marginBottom: 16 }}>
+          <Row gutter={[16, 8]} align="middle">
+            <Col>
+              <Checkbox
+                checked={selectedCities.length === CITIES.length}
+                indeterminate={selectedCities.length > 0 && selectedCities.length < CITIES.length}
+                onChange={e => handleSelectAll(e.target.checked)}
+              >全选</Checkbox>
+            </Col>
             <Col flex="auto">
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-                {cities.map(city => (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
+                {CITIES.map((city, i) => (
                   <Checkbox
                     key={city}
                     checked={selectedCities.includes(city)}
-                    onChange={(e) => handleCityChange(city, e.target.checked)}
-                  >
-                    {city}
-                  </Checkbox>
+                    onChange={e => handleCityChange(city, e.target.checked)}
+                    style={{ color: CITY_COLORS[i % CITY_COLORS.length] }}
+                  >{city}</Checkbox>
                 ))}
               </div>
             </Col>
           </Row>
-          <Row style={{ marginTop: 16 }}>
+          <Row gutter={16} align="middle" style={{ marginTop: 12 }}>
             <Col>
-              <Button type="primary" icon={<SearchOutlined />}>获取气象预测</Button>
+              <DatePicker.RangePicker
+                value={dateRange}
+                onChange={dates => dates && setDateRange(dates as [dayjs.Dayjs, dayjs.Dayjs])}
+                format="YYYY-MM-DD"
+              />
+            </Col>
+            <Col>
+              <Button type="primary" icon={<SearchOutlined />} onClick={fetchData} loading={loading}>
+                查询
+              </Button>
             </Col>
           </Row>
         </div>
 
-        {/* 图表 */}
-        <div>
-          <h3 style={{ color: '#fff', marginBottom: 16 }}>南京-气象预测信息</h3>
-          <h4 style={{ color: '#999', marginBottom: 16 }}>温度预报区域</h4>
-          <ReactECharts
-            option={chartOption}
-            style={{ height: 400 }}
-          />
-        </div>
+        <Spin spinning={loading}>
+          {data.length === 0 ? <Empty description="暂无数据" style={{ padding: '40px 0' }} /> : (
+            <>
+              <div style={{ marginBottom: 24 }}>
+                <h3 style={{ color: '#fff', marginBottom: 12 }}>云南各地州日最高气温（°C）</h3>
+                <ReactECharts option={tempOption} style={{ height: 320 }} />
+              </div>
+              <div>
+                <h3 style={{ color: '#fff', marginBottom: 12 }}>云南各地州日降水量（mm）</h3>
+                <ReactECharts option={precipOption} style={{ height: 280 }} />
+              </div>
+            </>
+          )}
+        </Spin>
       </Card>
     </div>
   )

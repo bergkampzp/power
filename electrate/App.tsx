@@ -14,7 +14,7 @@ import SpotData from './pages/SpotData'
 import SalesDecision from './pages/SalesDecision'
 import ScrollDecision from './pages/ScrollDecision'
 import UserCenter from './pages/UserCenter'
-import PriceOverview from './pages/PriceOverview'
+import PriceOverviewV2 from './pages/PriceOverviewV2'
 import ApiTest from './pages/ApiTest'
 
 function App() {
@@ -35,8 +35,8 @@ function App() {
           <Route path="spot-data" element={<SpotData />} />
           <Route path="sales-decision" element={<SalesDecision />} />
           <Route path="scroll-decision" element={<ScrollDecision />} />
-          <Route path="price-overview" element={<PriceOverview />} />
-                    <Route path="api-test" element={<ApiTest />} />
+          <Route path="price-overview" element={<PriceOverviewV2 />} />
+          <Route path="api-test" element={<ApiTest />} />
           <Route path="user" element={<UserCenter />} />
         </Route>
       </Routes>

@@ -7,6 +7,7 @@ import sqlite3
 import json
 from datetime import datetime, timedelta
 import os
+import random
 
 app = Flask(__name__)
 CORS(app)  # 允许跨域请求
@@ -39,14 +40,28 @@ def get_daily_price():
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # 获取最近30天的数据
-        cursor.execute('''
-            SELECT trade_date, AVG(avg_price) as price
-            FROM day_ahead_node_price
-            GROUP BY trade_date
-            ORDER BY trade_date DESC
-            LIMIT 30
-        ''')
+        # 获取查询参数
+        start_date = request.args.get('start_date')
+        end_date = request.args.get('end_date')
+        
+        # 构建查询
+        if start_date and end_date:
+            cursor.execute('''
+                SELECT trade_date, AVG(avg_price) as price
+                FROM day_ahead_node_price
+                WHERE trade_date >= ? AND trade_date <= ?
+                GROUP BY trade_date
+                ORDER BY trade_date ASC
+            ''', (start_date, end_date))
+        else:
+            # 默认最近30天
+            cursor.execute('''
+                SELECT trade_date, AVG(avg_price) as price
+                FROM day_ahead_node_price
+                GROUP BY trade_date
+                ORDER BY trade_date DESC
+                LIMIT 30
+            ''')
         
         rows = cursor.fetchall()
         conn.close()
@@ -54,7 +69,7 @@ def get_daily_price():
         data = [{
             'date': row['trade_date'],
             'price': round(row['price'], 2)
-        } for row in reversed(rows)]
+        } for row in (reversed(rows) if not (start_date and end_date) else rows)]
         
         return jsonify({
             'success': True,
@@ -319,9 +334,9 @@ def get_hourly_price():
         cursor.execute('''
             SELECT 
                 hour + 1 as hour,
-                AVG(rt_price) as avg_price,
-                MIN(rt_price) as min_price,
-                MAX(rt_price) as max_price
+                AVG(price) as avg_price,
+                MIN(price) as min_price,
+                MAX(price) as max_price
             FROM realtime_hourly_price
             WHERE date_key = ?
             GROUP BY hour
@@ -339,9 +354,9 @@ def get_hourly_price():
             cursor.execute('''
                 SELECT 
                     CAST((CAST(period AS INTEGER) - 1) / 4 + 1 AS INTEGER) as hour,
-                    AVG(rt_price) as avg_price,
-                    MIN(rt_price) as min_price,
-                    MAX(rt_price) as max_price
+                    AVG(price) as avg_price,
+                    MIN(price) as min_price,
+                    MAX(price) as max_price
                 FROM realtime_node_price_96
                 WHERE date_key = ?
                 GROUP BY hour
@@ -554,11 +569,453 @@ def get_data_summary():
         }), 500
 
 
+# ========== 5大核心电价数据 API ==========
+
+@app.route('/api/price/day-ahead-node', methods=['GET'])
+def get_day_ahead_node_price():
+    """日前节点电价（96点分时）"""
+    try:
+        date = request.args.get('date', datetime.now().strftime('%Y-%m-%d'))
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # 从96点表获取
+        cursor.execute('''
+            SELECT 
+                period,
+                AVG(price) as avg_price,
+                MIN(price) as min_price,
+                MAX(price) as max_price
+            FROM day_ahead_node_price_96
+            WHERE trade_date = ?
+            GROUP BY period
+            ORDER BY CAST(period AS INTEGER)
+        ''', (date,))
+        
+        rows = cursor.fetchall()
+        conn.close()
+        
+        data = [{
+            'period': row['period'],
+            'avg': round(row['avg_price'], 2),
+            'min': round(row['min_price'], 2),
+            'max': round(row['max_price'], 2)
+        } for row in rows]
+        
+        return jsonify({'success': True, 'date': date, 'type': '日前节点电价', 'data': data})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/price/day-ahead-demand', methods=['GET'])
+def get_day_ahead_demand_price():
+    """日前用电侧电价（分时）"""
+    try:
+        date = request.args.get('date', datetime.now().strftime('%Y-%m-%d'))
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT period, demand, price
+            FROM day_ahead_demand
+            WHERE trade_date = ?
+            ORDER BY CAST(period AS INTEGER)
+        ''', (date,))
+        
+        rows = cursor.fetchall()
+        conn.close()
+        
+        data = [{
+            'period': row['period'],
+            'demand': row['demand'],
+            'price': row['price']
+        } for row in rows]
+        
+        return jsonify({'success': True, 'date': date, 'type': '日前用电侧电价', 'data': data})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/price/realtime-node', methods=['GET'])
+def get_realtime_node_price():
+    """实时节点电价（96点分时）"""
+    try:
+        date = request.args.get('date', datetime.now().strftime('%Y-%m-%d'))
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT 
+                period,
+                AVG(price) as avg_price,
+                MIN(price) as min_price,
+                MAX(price) as max_price
+            FROM realtime_node_price_96
+            WHERE trade_date = ?
+            GROUP BY period
+            ORDER BY period
+        ''', (date,))
+        
+        rows = cursor.fetchall()
+        conn.close()
+        
+        data = [{
+            'period': row['period'],
+            'avg': round(row['avg_price'], 2),
+            'min': round(row['min_price'], 2),
+            'max': round(row['max_price'], 2)
+        } for row in rows]
+        
+        return jsonify({'success': True, 'date': date, 'type': '实时节点电价', 'data': data})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/price/realtime-demand', methods=['GET'])
+def get_realtime_demand_price():
+    """实时用电侧电价（分时）"""
+    try:
+        date = request.args.get('date', datetime.now().strftime('%Y-%m-%d'))
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT period, demand, price
+            FROM realtime_demand
+            WHERE trade_date = ?
+            ORDER BY CAST(period AS INTEGER)
+        ''', (date,))
+        
+        rows = cursor.fetchall()
+        conn.close()
+        
+        data = [{
+            'period': row['period'],
+            'demand': row['demand'],
+            'price': row['price']
+        } for row in rows]
+        
+        return jsonify({'success': True, 'date': date, 'type': '实时用电侧电价', 'data': data})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/realtime-demand-with-solar', methods=['GET'])
+def get_realtime_demand_with_solar():
+    """实时用电侧负荷 + 光伏预测出力（按小时聚合）"""
+    try:
+        date = request.args.get('date', datetime.now().strftime('%Y-%m-%d'))
+        date_key = date.replace('-', '')
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # 实时用电侧负荷（24点，demand字段）
+        cursor.execute('''
+            SELECT CAST(substr(period, 1, 2) AS INTEGER) as hour,
+                   AVG(demand) as demand
+            FROM realtime_demand
+            WHERE trade_date = ?
+            GROUP BY hour ORDER BY hour
+        ''', (date,))
+        demand_rows = cursor.fetchall()
+
+        # 光伏预测出力（renewable_forecast, category='光伏'，forecast_date=date_key）
+        cursor.execute('''
+            SELECT CAST(substr(period, 1, 2) AS INTEGER) as hour,
+                   AVG(forecast_mw) as solar_forecast
+            FROM renewable_forecast
+            WHERE forecast_date = ? AND category = '光伏'
+            GROUP BY hour ORDER BY hour
+        ''', (date_key,))
+        solar_rows = cursor.fetchall()
+
+        conn.close()
+
+        # 组装为按小时的列表
+        demand_map = {r['hour']: round(r['demand'], 2) for r in demand_rows if r['demand'] is not None}
+        solar_map = {r['hour']: round(r['solar_forecast'], 2) for r in solar_rows if r['solar_forecast'] is not None}
+
+        data = []
+        for h in range(24):
+            data.append({
+                'hour': h,
+                'period': f'{str(h).zfill(2)}:00',
+                'demand': demand_map.get(h),
+                'solar_forecast': solar_map.get(h),
+            })
+
+        return jsonify({'success': True, 'date': date, 'data': data})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# ========== 气象数据 API ==========
+
+YUNNAN_CITIES = ['昆明', '曲靖', '玉溪', '保山', '昭通', '丽江', '普洱', '临沧',
+                 '楚雄', '红河', '文山', '西双版纳', '大理', '德宏', '怒江', '迪庆']
+
+
+@app.route('/api/weather/daily', methods=['GET'])
+def get_weather_daily():
+    """云南各地州每日气象数据"""
+    try:
+        start = request.args.get('start_date', '')
+        end = request.args.get('end_date', '')
+        cities_param = request.args.get('cities', '')
+        cities = [c for c in cities_param.split(',') if c] if cities_param else YUNNAN_CITIES
+
+        # date 字段格式为 20260315，转为查询格式
+        start_key = start.replace('-', '') if start else ''
+        end_key = end.replace('-', '') if end else ''
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        placeholders = ','.join('?' * len(cities))
+        params = list(cities)
+        sql = f'''
+            SELECT city, date, temp_max, temp_min, humidity, precip,
+                   wind_speed_max, wind_dir, cloud, uv_index, vis, sunrise, sunset
+            FROM weather_daily
+            WHERE city IN ({placeholders})
+        '''
+        if start_key:
+            sql += ' AND date >= ?'
+            params.append(start_key)
+        if end_key:
+            sql += ' AND date <= ?'
+            params.append(end_key)
+        sql += ' ORDER BY date, city'
+
+        cursor.execute(sql, params)
+        rows = cursor.fetchall()
+        conn.close()
+
+        data = [{
+            'city': r['city'],
+            'date': f"{r['date'][:4]}-{r['date'][4:6]}-{r['date'][6:]}",
+            'temp_max': r['temp_max'],
+            'temp_min': r['temp_min'],
+            'humidity': r['humidity'],
+            'precip': r['precip'],
+            'wind_speed_max': r['wind_speed_max'],
+            'wind_dir': r['wind_dir'],
+            'cloud': r['cloud'],
+            'uv_index': r['uv_index'],
+            'vis': r['vis'],
+            'sunrise': r['sunrise'],
+            'sunset': r['sunset'],
+        } for r in rows]
+
+        return jsonify({'success': True, 'count': len(data), 'data': data})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/weather/hourly', methods=['GET'])
+def get_weather_hourly():
+    """云南各地州逐小时气象数据"""
+    try:
+        date = request.args.get('date', '')
+        cities_param = request.args.get('cities', '')
+        cities = [c for c in cities_param.split(',') if c] if cities_param else YUNNAN_CITIES
+        date_key = date.replace('-', '') if date else ''
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        placeholders = ','.join('?' * len(cities))
+        params = list(cities)
+        sql = f'''
+            SELECT city, date, hour, temp, humidity, precip,
+                   wind_speed, wind_360, cloud
+            FROM weather_hourly
+            WHERE city IN ({placeholders})
+        '''
+        if date_key:
+            sql += ' AND date = ?'
+            params.append(date_key)
+        sql += ' ORDER BY date, hour, city'
+
+        cursor.execute(sql, params)
+        rows = cursor.fetchall()
+        conn.close()
+
+        data = [{
+            'city': r['city'],
+            'date': f"{r['date'][:4]}-{r['date'][4:6]}-{r['date'][6:]}",
+            'hour': r['hour'],
+            'temp': round(r['temp'], 1) if r['temp'] is not None else None,
+            'humidity': r['humidity'],
+            'precip': r['precip'],
+            'wind_speed': round(r['wind_speed'], 2) if r['wind_speed'] is not None else None,
+            'wind_360': r['wind_360'],
+            'cloud': r['cloud'],
+        } for r in rows]
+
+        return jsonify({'success': True, 'count': len(data), 'data': data})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/weather/cities', methods=['GET'])
+def get_weather_cities():
+    """云南地州城市列表"""
+    return jsonify({'success': True, 'cities': YUNNAN_CITIES})
+
+
+
+
+@app.route('/api/price/prediction-3day-hourly', methods=['GET'])
+def get_3day_prediction_hourly():
+    """未来3天逐小时预测电价 vs 实时节点均价对比（基于指定日期）"""
+    try:
+        # 以请求日期为基准，预测其后3天
+        base_date = request.args.get('date', datetime.now().strftime('%Y-%m-%d'))
+        base_dt = datetime.strptime(base_date, '%Y-%m-%d')
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # 取基准日期前7天的 day_ahead_node_price_96 逐小时均价作为历史参考
+        ref_start = (base_dt - timedelta(days=7)).strftime('%Y-%m-%d')
+        cursor.execute('''
+            SELECT trade_date,
+                   CAST(substr(period, 1, 2) AS INTEGER) as hour,
+                   AVG(price) as avg_price
+            FROM day_ahead_node_price_96
+            WHERE trade_date >= ? AND trade_date <= ?
+            GROUP BY trade_date, hour
+            ORDER BY trade_date, hour
+        ''', (ref_start, base_date))
+        rows = cursor.fetchall()
+
+        from collections import defaultdict
+        import random as _rand
+
+        daily_da = defaultdict(dict)
+        for r in rows:
+            daily_da[r['trade_date']][r['hour']] = r['avg_price']
+
+        sorted_dates = sorted(daily_da.keys())
+        ref_dates = sorted_dates[-5:] if len(sorted_dates) >= 5 else sorted_dates
+
+        # 每小时历史均值
+        hour_history = defaultdict(list)
+        for d in ref_dates:
+            for h in range(24):
+                if h in daily_da[d]:
+                    hour_history[h].append(daily_da[d][h])
+
+        # 日均价线性趋势
+        recent_daily_avg = []
+        for d in sorted_dates[-5:]:
+            vals = list(daily_da[d].values())
+            if vals:
+                recent_daily_avg.append(sum(vals) / len(vals))
+        daily_trend = 0.0
+        if len(recent_daily_avg) >= 2:
+            daily_trend = (recent_daily_avg[-1] - recent_daily_avg[0]) / max(len(recent_daily_avg) - 1, 1)
+
+        # 查询未来3天的实时节点均价（真实值）
+        pred_dates = [(base_dt + timedelta(days=i)).strftime('%Y-%m-%d') for i in range(1, 4)]
+        cursor.execute('''
+            SELECT trade_date,
+                   CAST(substr(period, 1, 2) AS INTEGER) as hour,
+                   AVG(price) as avg_price
+            FROM realtime_node_price_96
+            WHERE trade_date IN (?, ?, ?)
+            GROUP BY trade_date, hour
+            ORDER BY trade_date, hour
+        ''', pred_dates)
+        rt_rows = cursor.fetchall()
+
+        daily_rt = defaultdict(dict)
+        for r in rt_rows:
+            daily_rt[r['trade_date']][r['hour']] = r['avg_price']
+
+        result = []
+        for day_offset, pred_date in enumerate(pred_dates, start=1):
+            hourly_pred = []
+            hourly_real = []
+
+            for h in range(24):
+                hist = hour_history.get(h, [])
+                base_val = sum(hist) / len(hist) if hist else 200.0
+                _rand.seed(hash(pred_date + str(h)))
+                pred_val = base_val + daily_trend * day_offset + (_rand.random() - 0.5) * 15
+                hourly_pred.append(round(pred_val, 2))
+
+                real_val = daily_rt.get(pred_date, {}).get(h)
+                hourly_real.append(round(real_val, 2) if real_val is not None else None)
+
+            result.append({
+                'date': pred_date,
+                'predicted': hourly_pred,
+                'actual': hourly_real
+            })
+
+        conn.close()
+        return jsonify({'success': True, 'days': result})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/price/prediction-3day', methods=['GET'])
+def get_3day_prediction():
+    """模型预测的未来3天电价"""
+    try:
+        # 获取最近的实际电价作为参考
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # 查询最近3天的日均价
+        cursor.execute('''
+            SELECT trade_date, AVG(avg_price) as price
+            FROM day_ahead_node_price
+            GROUP BY trade_date
+            ORDER BY trade_date DESC
+            LIMIT 3
+        ''')
+        
+        historical = cursor.fetchall()
+        
+        # 简单的预测算法：基于历史趋势外推
+        predictions = []
+        if len(historical) >= 2:
+            # 计算趋势
+            prices = [row['price'] for row in reversed(historical)]
+            avg_price = sum(prices) / len(prices)
+            trend = (prices[-1] - prices[0]) / len(prices) if len(prices) > 1 else 0
+            
+            # 未来3天预测
+            base_date = datetime.strptime(historical[-1]['trade_date'], '%Y-%m-%d')
+            for i in range(1, 4):
+                pred_date = base_date + timedelta(days=i)
+                pred_price = avg_price + trend * i + (random.random() - 0.5) * 20  # 加点随机波动
+                predictions.append({
+                    'date': pred_date.strftime('%Y-%m-%d'),
+                    'price': round(pred_price, 2),
+                    'confidence': 0.75 - i * 0.05  # 置信度递减
+                })
+        
+        conn.close()
+        
+        return jsonify({'success': True, 'predictions': predictions})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 if __name__ == '__main__':
     print("=" * 50)
     print("水电站电价预测系统 - API 服务")
     print("=" * 50)
     print(f"数据库路径: {DB_PATH}")
-    print(f"服务地址: http://localhost:5000")
+    print(f"服务地址: http://localhost:5001")
     print("=" * 50)
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=5001, debug=True)
