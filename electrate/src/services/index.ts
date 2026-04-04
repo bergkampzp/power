@@ -2,7 +2,19 @@
  * API 服务 - 电力交易系统
  */
 
-const API_BASE = '/api'
+// 动态获取 API 基础路径
+// 开发环境: /api (通过 vite proxy 代理)
+// 生产环境: /electrate/api (通过 nginx 代理)
+const getApiBase = () => {
+  // 如果是开发环境 (localhost 且端口为 5173/5174)
+  if (window.location.port === '5173' || window.location.port === '5174') {
+    return '/api'
+  }
+  // 生产环境使用子路径
+  return '/electrate/api'
+}
+
+const API_BASE = getApiBase()
 
 // Dashboard 数据
 export async function getDashboardData() {

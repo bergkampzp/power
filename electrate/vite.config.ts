@@ -4,6 +4,8 @@ import path from 'path'
 
 export default defineConfig({
   plugins: [react()],
+  // 生产环境的基础路径，部署到 /electrate/ 子路径
+  base: '/electrate/',
   server: {
     port: 5174,
     host: true,

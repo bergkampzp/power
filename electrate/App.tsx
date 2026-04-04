@@ -19,7 +19,7 @@ import ApiTest from './pages/ApiTest'
 
 function App() {
   return (
-    <Router>
+    <Router basename="/electrate">
       <Routes>
         <Route path="/" element={<Layout />}>
           <Route index element={<Home />} />
