@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 
 sys.stdout.reconfigure(encoding='utf-8')
 
-DB = 'F:/work/power-supply-v2/power/power-data/power_market_v2.db'
+from config import DB
 ctx = ssl.create_default_context()
 
 YUNNAN_CITIES = [

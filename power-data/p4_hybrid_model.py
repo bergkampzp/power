@@ -32,8 +32,7 @@ except:
 
 warnings.filterwarnings('ignore')
 
-DB = 'F:/work/power-supply-v2/power/power-data/power_market_v2.db'
-OUT_DIR = 'F:/work/power-supply-v2/power/power-data'
+from config import DB, OUT_DIR
 
 plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'DejaVu Sans']
 plt.rcParams['axes.unicode_minus'] = False

@@ -30,8 +30,7 @@ from torch.utils.data import DataLoader, TensorDataset
 sys.stdout.reconfigure(encoding='utf-8')
 warnings.filterwarnings('ignore')
 
-DB = 'F:/work/power-supply-v2/power/power-data/power_market_v2.db'
-OUT_DIR = 'F:/work/power-supply-v2/power/power-data'
+from config import DB, OUT_DIR
 
 plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'DejaVu Sans']
 plt.rcParams['axes.unicode_minus'] = False
@@ -76,14 +75,18 @@ grid_da_96['hour'] = grid_da_96['period'].str[:2].astype(int)
 renew_fc_96 = pd.read_sql(
     "SELECT forecast_date as date_key, period, forecast_mw as renew_fc FROM renewable_forecast WHERE region='云南' AND category='总计'", conn)
 renew_fc_96['hour'] = renew_fc_96['period'].str[:2].astype(int)
+# ⚠️ 时效性: publish_date=D 含 forecast_date=[D, D+1, ..., D+6]，当前用forecast_date做join，D日nowcast可能不可用
 
 hydro_fc = pd.read_sql("SELECT forecast_date as date_key, avg_output_mw as hydro_fc_avg FROM hydro_forecast WHERE region='云南'", conn)
 hydro_fc = hydro_fc.groupby('date_key').agg(hydro_fc_avg=('hydro_fc_avg', 'mean')).reset_index()
+# ⚠️ 时效性同上
 
 gen_fc_96 = pd.read_sql("SELECT forecast_date as date_key, period, forecast_mw as gen_fc FROM generation_forecast", conn)
 gen_fc_96['hour'] = gen_fc_96['period'].str[:2].astype(int)
+# ⚠️ 时效性同上
 
 load_fc_96 = pd.read_sql("SELECT trade_date as td, period, forecast_load as load_fc FROM load_forecast WHERE region='云南'", conn)
+# ⚠️ 时效性: load_forecast无publish_date字段，建议改进: ETL增加publish_date或shift 1天
 load_fc_96['date_key'] = load_fc_96['td'].str.replace('-', '')
 load_fc_96['hour'] = load_fc_96['period'].str[:2].astype(int)
 
@@ -163,17 +166,30 @@ df.rename(columns={'load': 'total_load'}, inplace=True)
 # 3. CEEMDAN Decomposition
 # ============================================================
 print("[3/8] CEEMDAN decomposition...")
-from scipy.signal import savgol_filter
+# Causal decomposition: use only past data (no future leakage from Savgol)
+def _causal_trend(signal, half_life=14):
+    """单向指数加权趋势，只使用过去数据"""
+    weights = np.exp(-np.linspace(0, 3, half_life))
+    weights /= weights.sum()
+    trend = np.convolve(signal, weights[::-1], mode='same')
+    trend[:half_life] = signal[:half_life]
+    return trend
+
+def _causal_wave(residual, half_life=5):
+    """单向波动分量"""
+    weights = np.exp(-np.linspace(0, 2, half_life))
+    weights /= weights.sum()
+    wave = np.convolve(residual, weights[::-1], mode='same')
+    wave[:half_life] = residual[:half_life]
+    return wave
 
 daily_price = df.groupby('date_key')['rt_price'].mean().reset_index().sort_values('date_key').reset_index(drop=True)
 price_signal = daily_price['rt_price'].values
 try:
     n = len(price_signal)
-    win = min(21, n // 3) | 1
-    trend = savgol_filter(price_signal, window_length=win, polyorder=2)
+    trend = _causal_trend(price_signal, half_life=min(14, max(3, n//4)))
     residual1 = price_signal - trend
-    win2 = min(7, n // 5) | 1
-    wave = savgol_filter(residual1, window_length=win2, polyorder=1)
+    wave = _causal_wave(residual1, half_life=min(5, max(2, n//6)))
     spike = residual1 - wave
     daily_price['price_trend'] = trend
     daily_price['price_wave'] = wave

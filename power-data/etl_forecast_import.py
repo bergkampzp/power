@@ -14,8 +14,9 @@ Data source: 信息披露/extracted/信息批露YY-MM-DD/output/
 import sqlite3, os, glob, re, time
 import xlrd
 
-DB = 'F:/work/power-supply-v2/power/power-data/power_market_v2.db'
-BASE_DIR = 'F:/work/power-supply-v2/power/power-data/powper-data-3-26/powper-data/信息披露/extracted'
+from config import DB
+from config import POWPER_BASE as _PB
+BASE_DIR = os.path.join(_PB, 'powper-data', '信息披露', 'extracted')
 
 def log(msg):
     print(f"  {msg}", flush=True)

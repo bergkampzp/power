@@ -12,7 +12,7 @@ import sqlite3
 import pandas as pd
 import os
 
-DB_PATH = '/home/zp/clawd/projects/power-supply/electrate-clone/power-data/power_market.db'
+from config import DB_PATH
 
 def create_external_tables():
     """创建外部数据表"""
@@ -24,6 +24,7 @@ def create_external_tables():
         CREATE TABLE IF NOT EXISTS load_forecast (
             id INTEGER PRIMARY KEY,
             trade_date TEXT,
+            publish_date TEXT,
             period TEXT,
             forecast_load REAL,
             actual_load REAL,
@@ -105,7 +106,7 @@ def import_from_oneclick_export():
     import glob
     import re
     
-    export_dir = '/home/zp/clawd/projects/power-supply/electrate-clone/power-data/一键导出-2月/extracted/output'
+    export_dir = os.path.join(OUTPUT_DIR, '一键导出-2月', 'extracted', 'output')
     
     if not os.path.exists(export_dir):
         print(f"目录不存在: {export_dir}")

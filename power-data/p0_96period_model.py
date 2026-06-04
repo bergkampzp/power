@@ -19,8 +19,7 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 import warnings
 warnings.filterwarnings('ignore')
 
-DB_PATH = 'F:/work/power-supply-v2/power/reference-data/power_market.db'
-OUTPUT_DIR = 'F:/work/power-supply-v2/power/power-data'
+from config import DB_PATH, OUTPUT_DIR
 
 # ================================================================
 # 1. LOAD ALL DATA FROM DATABASE (with deduplication)

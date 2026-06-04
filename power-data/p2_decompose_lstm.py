@@ -25,8 +25,7 @@ from torch.utils.data import DataLoader, TensorDataset
 
 warnings.filterwarnings('ignore')
 
-DB = 'F:/work/power-supply-v2/power/power-data/power_market_v2.db'
-OUT_DIR = 'F:/work/power-supply-v2/power/power-data'
+from config import DB, OUT_DIR
 
 plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'DejaVu Sans']
 plt.rcParams['axes.unicode_minus'] = False
@@ -71,14 +70,25 @@ grid_da_96['hour'] = grid_da_96['period'].str[:2].astype(int)
 renew_fc_96 = pd.read_sql(
     "SELECT forecast_date as date_key, period, forecast_mw as renew_fc FROM renewable_forecast WHERE region='云南' AND category='总计'", conn)
 renew_fc_96['hour'] = renew_fc_96['period'].str[:2].astype(int)
+# ⚠️ 时效性验证: renewable_forecast 有 publish_date 和 forecast_date
+#    publish_date=D 包含 forecast_date=[D, D+1, ..., D+6] 的预测
+#    当前使用 forecast_date 作为 join key (D日预测用于D日价格)
+#    风险: D日预测可能是同日nowcast，在真实预测场景(D-1日做D日预测)中可能不可用
+#    建议改进: 使用 publish_date + 1 的 forecast (即D-1日发布的D日预测)
+#    → 详见: 电价预测模型改善行动方案.md §2.2
 
 hydro_fc = pd.read_sql("SELECT forecast_date as date_key, avg_output_mw as hydro_fc_avg FROM hydro_forecast WHERE region='云南'", conn)
 hydro_fc = hydro_fc.groupby('date_key').agg(hydro_fc_avg=('hydro_fc_avg', 'mean')).reset_index()
+# ⚠️ 时效性: hydro_forecast 也有 publish_date, 同上
 
 gen_fc_96 = pd.read_sql("SELECT forecast_date as date_key, period, forecast_mw as gen_fc FROM generation_forecast", conn)
 gen_fc_96['hour'] = gen_fc_96['period'].str[:2].astype(int)
+# ⚠️ 时效性: generation_forecast 也有 publish_date, 同上
 
 load_fc_96 = pd.read_sql("SELECT trade_date as td, period, forecast_load as load_fc FROM load_forecast WHERE region='云南'", conn)
+# ⚠️ 时效性: load_forecast 无 publish_date 字段, 仅有 trade_date
+#    无法判断 trade_date 是发布日还是预测日
+#    建议改进: 在ETL中增加 publish_date 列, 或 shift 1天对齐
 load_fc_96['date_key'] = load_fc_96['td'].str.replace('-', '')
 load_fc_96['hour'] = load_fc_96['period'].str[:2].astype(int)
 
@@ -91,6 +101,12 @@ maint = pd.read_sql("SELECT trade_date, COUNT(*) as maint_count FROM maintenance
 channel = pd.read_sql("SELECT trade_date, capacity FROM transmission_channel", conn)
 interline = pd.read_sql("SELECT trade_date, power_flow, period FROM inter_provincial_line", conn)
 interline['hour'] = interline['period'].str[:2].astype(int)
+
+# Weather correction features (28,296 records, 2023-01 ~ 2026-03)
+weather_corr = pd.read_sql(
+    """SELECT date, hour, solar_correction, wind_correction, combined_correction
+       FROM weather_correction""", conn)
+weather_corr['date_key'] = weather_corr['date'].str.replace('-', '')
 
 conn.close()
 
@@ -140,6 +156,7 @@ for src, cols, on in [
     (maint, ['maint_count'], ['date_key']),
     (chan_d, ['total_chan_cap'], ['date_key']),
     (inter_h, ['total_flow'], ['date_key', 'hour']),
+    (weather_corr, ['solar_correction', 'wind_correction', 'combined_correction'], ['date_key', 'hour']),
 ]:
     df = df.merge(src[on + cols], on=on, how='left')
 
@@ -150,30 +167,41 @@ df.rename(columns={'load': 'total_load'}, inplace=True)
 # ============================================================
 print("[3/7] CEEMDAN decomposition...")
 
-from scipy.signal import savgol_filter
-from scipy.ndimage import uniform_filter1d
+# Causal decomposition: use only past data (no future leakage)
+def _causal_trend(signal, half_life=14):
+    """单向指数加权趋势：只使用过去数据，避免Savgol的中心窗口泄漏"""
+    weights = np.exp(-np.linspace(0, 3, half_life))
+    weights /= weights.sum()
+    trend = np.convolve(signal, weights[::-1], mode='same')
+    trend[:half_life] = signal[:half_life]
+    return trend
 
-# Decompose daily avg price into trend + wave + spike using scipy filters
+def _causal_wave(residual, half_life=5):
+    """单向波动分量"""
+    weights = np.exp(-np.linspace(0, 2, half_life))
+    weights /= weights.sum()
+    wave = np.convolve(residual, weights[::-1], mode='same')
+    wave[:half_life] = residual[:half_life]
+    return wave
+
+# Decompose daily avg price into trend + wave + spike (causal only)
 daily_price = df.groupby('date_key')['rt_price'].mean().reset_index()
 daily_price = daily_price.sort_values('date_key').reset_index(drop=True)
 price_signal = daily_price['rt_price'].values
 
 try:
     n = len(price_signal)
-    # Trend: heavy smoothing (21-day moving average)
-    win = min(21, n // 3) | 1  # ensure odd
-    trend = savgol_filter(price_signal, window_length=win, polyorder=2)
-    # Wave: medium frequency (7-day smoothed residual)
+    # Causal trend: exponential weighted (14-day half-life)
+    trend = _causal_trend(price_signal, half_life=min(14, max(3, n//4)))
+    # Causal wave: 5-day half-life on residual
     residual1 = price_signal - trend
-    win2 = min(7, n // 5) | 1
-    wave = savgol_filter(residual1, window_length=win2, polyorder=1)
-    # Spike: high frequency remainder
+    wave = _causal_wave(residual1, half_life=min(5, max(2, n//6)))
     spike = residual1 - wave
 
     daily_price['price_trend'] = trend
     daily_price['price_wave'] = wave
     daily_price['price_spike'] = spike
-    print(f"  Decomposition: trend(21d) + wave(7d) + spike, signal len={n}")
+    print(f"  Decomposition: causal_trend(14d) + causal_wave(5d) + spike, signal len={n}")
 
     df = df.merge(daily_price[['date_key', 'price_trend', 'price_wave', 'price_spike']],
                   on='date_key', how='left')
@@ -296,6 +324,8 @@ FEATURES = [
     'reserve_change', 'reserve_up_lag1d', 'maint_count', 'maint_change',
     'total_chan_cap', 'chan_change', 'total_flow', 'flow_to_cap',
     'renew_fc_error_1d',
+    # Weather correction features
+    'solar_correction', 'wind_correction', 'combined_correction',
     # Stage 3: CEEMDAN
     'price_trend', 'price_wave', 'price_spike', 'trend_lag1d', 'spike_lag1d',
 ]

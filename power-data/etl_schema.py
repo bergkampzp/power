@@ -8,8 +8,12 @@ ETL Step 1: Create extended database schema
 """
 import sqlite3, shutil, os
 
-SRC_DB = 'F:/work/power-supply-v2/power/reference-data/power_market.db'
-DST_DB = 'F:/work/power-supply-v2/power/power-data/power_market_v2.db'
+from config import DB_PATH
+
+# SRC_DB: 旧版 reference database (不再存在)
+# DST_DB: 新版 power_market_v2.db
+SRC_DB = DB_PATH
+DST_DB = DB_PATH
 
 # Copy original DB as starting point
 if os.path.exists(DST_DB):

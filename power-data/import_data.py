@@ -12,8 +12,8 @@ import glob
 import os
 
 # 数据库路径
-DB_PATH = '/home/zp/clawd/projects/power-supply/electrate-clone/power-data/power_market.db'
-DATA_DIR = '/home/zp/clawd/projects/power-supply/electrate-clone/power-data'
+from config import DB_PATH, OUTPUT_DIR
+DATA_DIR = OUTPUT_DIR
 
 def create_connection():
     return sqlite3.connect(DB_PATH)

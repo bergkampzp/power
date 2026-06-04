@@ -13,8 +13,8 @@ from datetime import datetime
 
 warnings.filterwarnings('ignore')
 
-DB_PATH = 'F:/work/power-supply-v2/power/power-data/power_market_v2.db'
-BASE = 'F:/work/power-supply-v2/power/power-data/powper-data-3-26'
+from config import DB_PATH
+from config import POWPER_BASE as BASE
 POWPER = os.path.join(BASE, 'powper-data')
 
 conn = sqlite3.connect(DB_PATH)
