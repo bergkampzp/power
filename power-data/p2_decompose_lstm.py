@@ -85,11 +85,7 @@ gen_fc_96 = pd.read_sql("SELECT forecast_date as date_key, period, forecast_mw a
 gen_fc_96['hour'] = gen_fc_96['period'].str[:2].astype(int)
 # ⚠️ 时效性: generation_forecast 也有 publish_date, 同上
 
-load_fc_96 = pd.read_sql("SELECT trade_date as td, period, forecast_load as load_fc FROM load_forecast WHERE region='云南'", conn)
-# ⚠️ 时效性: load_forecast 无 publish_date 字段, 仅有 trade_date
-#    无法判断 trade_date 是发布日还是预测日
-#    建议改进: 在ETL中增加 publish_date 列, 或 shift 1天对齐
-load_fc_96['date_key'] = load_fc_96['td'].str.replace('-', '')
+load_fc_96 = pd.read_sql("SELECT date_key, period, load as load_fc FROM hourly_load WHERE region='云南'", conn)
 load_fc_96['hour'] = load_fc_96['period'].str[:2].astype(int)
 
 # Stage 1 data
