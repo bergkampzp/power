@@ -370,6 +370,15 @@ FEATURES = [
 ]
 
 feat = [f for f in FEATURES if f in df.columns]
+# 剔除"死特征": 闸口对齐后无数据或零方差。
+# 例: generation_forecast/hydro_forecast 全部为当日/回填(无次日预测期), 闸口对齐后全NaN,
+# 连带 renew_fc_share(=renew_fc/gen_fc) 恒为0。这些特征对模型无信息, 显式剔除并告警,
+# 避免"特征数"虚高、误导 MAE 归因。
+_dead = [f for f in feat
+         if df[f].notna().sum() == 0 or df[f].nunique(dropna=True) <= 1]
+if _dead:
+    print(f"  ⚠️ 剔除死特征 {len(_dead)} 个 (闸口对齐后无数据/零方差): {_dead}", flush=True)
+    feat = [f for f in feat if f not in _dead]
 print(f"  特征: {len(feat)} active", flush=True)
 
 # ============================================================
@@ -387,11 +396,13 @@ print(f"  持久化基线 MAE={persist_mae:.1f} ¥/MWh, R²={persist_r2:.3f}", f
 # ============================================================
 # 4. Walk-forward 回测
 # ============================================================
-print("\n[4/5] Walk-forward backtest (last 10 days)...", flush=True)
+print("\n[4/5] Walk-forward backtest...", flush=True)
 
-# 最后10个有da_target的日期
+# 测试窗口取最近 N_TEST 天。需 > BLEND_V 才能让自适应α真正生效(前BLEND_V天用冷启动先验,
+# 之后逐日按过去BLEND_V天验证误差自适应)。10天窗口噪声大且会使α退化为固定值, 故取40。
+N_TEST = 40
 valid_dates = sorted(df.dropna(subset=['da_target'])['date_key'].unique())
-test_dates = valid_dates[-10:]
+test_dates = valid_dates[-N_TEST:]
 print(f"  测试日期: {test_dates[0]} ~ {test_dates[-1]} ({len(test_dates)}天)", flush=True)
 
 results = []
