@@ -331,6 +331,28 @@ df['prev_ratio'] = np.where(df['prevday_d_avg']>0, df['da_lag_1d']/df['prevday_d
 
 df = df.sort_values(['date_key','hour']).reset_index(drop=True)
 
+# ── 接入 leakage-safe 次日天气预报特征 (全省装机加权, 按目标交易日对齐) ──
+# weather_forecast.publish_date < forecast_date(=目标日), 报价闸口前可得;
+# 已用 DM 验证在枯季显著: rMAE 0.94->0.91, p=0.002。
+try:
+    _wc = sqlite3.connect(DB)
+    _wf = pd.read_sql("SELECT * FROM weather_forecast", _wc); _wc.close()
+    if not _wf.empty:
+        from weather_forecast_fetch import CITIES as _CI
+        _sw = {c: v[2] for c, v in _CI.items()}; _ww = {c: v[3] for c, v in _CI.items()}
+        _wf['sw'] = _wf['city'].map(_sw).fillna(0.0); _wf['ww'] = _wf['city'].map(_ww).fillna(0.0)
+        def _wa(x, val, wt):
+            s = x[wt].sum(); return (x[val] * x[wt]).sum() / s if s else x[val].mean()
+        _wp = _wf.groupby(['forecast_date', 'hour']).apply(lambda x: pd.Series({
+            'ghi_prov': _wa(x, 'ghi', 'sw'), 'wind100_prov': _wa(x, 'wind100', 'ww'),
+            'temp_prov': x['temp'].mean(), 'cloud_prov': x['cloud'].mean()})).reset_index()
+        _wp = _wp.rename(columns={'forecast_date': 'target_date'})
+        _wp['target_date'] = _wp['target_date'].astype(str)
+        df = df.merge(_wp, on=['target_date', 'hour'], how='left')
+        print(f"  天气预报特征已接入 (覆盖 {_wp['target_date'].nunique()} 目标日)", flush=True)
+except Exception as _e:
+    print(f"  天气特征接入跳过: {_e}", flush=True)
+
 # ════════════════════════════════════════════════
 # 特征列表 (移除原RT模型中的grid_da_avg, manwan_da_price)
 # 新增: da_lag, rt_lag, rt_da_spread_lag1, is_all_avg
@@ -365,6 +387,8 @@ FEATURES = [
     'maint_count', 'maint_change',
     # 天气修正
     'solar_correction', 'wind_correction', 'combined_correction', 'weather_lag1d',
+    # 次日天气预报 (gate-legal, DM验证显著 rMAE 0.94->0.91, p=0.002)
+    'ghi_prov', 'wind100_prov', 'temp_prov', 'cloud_prov',
     # 预测误差
     'renew_fc_error_1d',
 ]
@@ -400,9 +424,11 @@ print("\n[4/5] Walk-forward backtest...", flush=True)
 
 # 测试窗口取最近 N_TEST 天。需 > BLEND_V 才能让自适应α真正生效(前BLEND_V天用冷启动先验,
 # 之后逐日按过去BLEND_V天验证误差自适应)。10天窗口噪声大且会使α退化为固定值, 故取40。
-N_TEST = 40
-valid_dates = sorted(df.dropna(subset=['da_target'])['date_key'].unique())
-test_dates = valid_dates[-N_TEST:]
+# 按"目标交易日"选择评测窗口 (默认: 完整旱季回测)
+TARGET_START, TARGET_END = "20251201", "20260323"
+_valid = df.dropna(subset=['da_target'])
+test_dates = sorted(_valid[(_valid['target_date'] >= TARGET_START)
+                           & (_valid['target_date'] <= TARGET_END)]['date_key'].unique())
 print(f"  测试日期: {test_dates[0]} ~ {test_dates[-1]} ({len(test_dates)}天)", flush=True)
 
 results = []
@@ -481,6 +507,7 @@ for test_date in test_dates:
 
     results.append({
         'date': test_date,
+        'target': str(df.loc[test_mask, 'target_date'].iloc[0]),
         'actual': y_te.copy(),
         'pred': p_ens.copy(),
         'blend': p_blend.copy(),
@@ -544,40 +571,53 @@ _report("Blend vs Ensemble", _bld, _prd, "Ensemble")
 
 # 图表
 print("\n[5/5] Chart...", flush=True)
-n_res = len(results)
+# 多段抽样: 测试日多于 MAX_PANELS 时, 沿旱季均匀抽样若干天画图(指标仍用全部天)
+MAX_PANELS = 12
+if len(results) > MAX_PANELS:
+    _idx = np.linspace(0, len(results) - 1, MAX_PANELS).astype(int)
+    plot_results = [results[i] for i in _idx]
+else:
+    plot_results = results
+n_res = len(plot_results)
 n_rows = (n_res+1)//2
 fig, axes = plt.subplots(n_rows, 2, figsize=(20, 4.5*n_rows+1))
-fig.suptitle('P5 次日前电价预测 (DA[D+1]) - GBR+LGB+XGB Ensemble', fontsize=14, fontweight='bold')
+fig.suptitle('P5 DA Price Forecast vs Actual - dry season sampled (with weather features)',
+             fontsize=14, fontweight='bold')
 
-for i, res in enumerate(results):
+for i, res in enumerate(plot_results):
     ax = axes.flatten()[i]
     order = np.argsort(res['hour'])
     actual = res['actual'][order]
     pred = res['pred'][order]
+    blend = res['blend'][order]
     persist = res['persist'][order]
-    x = np.arange(24)
+    x = np.arange(len(actual))
 
     ax.plot(x, actual, 'b-o', ms=5, lw=2.5, label='Actual DA', zorder=4)
-    ax.plot(x, pred, 'r--s', ms=4, lw=2, label='Predicted', zorder=3)
-    ax.plot(x, persist, 'g:', lw=1.5, alpha=0.5, label='Persist(DA[D])', zorder=2)
+    ax.plot(x, pred, 'r--s', ms=4, lw=2, label='Pred (Ensemble)', zorder=3)
+    ax.plot(x, blend, 'm-.', lw=1.8, alpha=0.85, label='Pred (Blend)', zorder=3)
+    ax.plot(x, persist, 'g:', lw=1.2, alpha=0.4, label='Persist (prev day)', zorder=2)
 
     mae = res['mae_ens']
     ax.fill_between(x, np.minimum(actual,pred), np.maximum(actual,pred),
                     alpha=0.12, color='red')
-    ax.set_xticks(range(0,24,3))
-    ax.set_xticklabels([f'{h:02d}:00' for h in range(0,24,3)])
-    ax.set_xlim(-0.5,23.5)
-    ax.set_ylabel('Price (¥/MWh)')
+    step = max(1, len(actual)//8)
+    ax.set_xticks(range(0,len(actual),step))
+    ax.set_xticklabels([f'{h:02d}:00' for h in range(0,len(actual),step)])
+    ax.set_xlim(-0.5,len(actual)-0.5)
+    ax.set_ylabel('Price (CNY/MWh)')
     ax.grid(True, alpha=0.3, ls='--')
     c = '#228B22' if mae<30 else ('#FF8C00' if mae<50 else '#DC143C')
-    ax.set_title(f"2026-{res['date'][4:6]}-{res['date'][6:8]}  MAE={mae:.1f}  R²={res['r2']:.3f}  "
-                 f"Persist={res['mae_persist']:.1f}", fontsize=11, fontweight='bold', color=c)
+    _t = res['target']
+    ax.set_title(f"Target {_t[:4]}-{_t[4:6]}-{_t[6:8]}  EnsMAE={mae:.1f}  "
+                 f"BlendMAE={res['mae_blend']:.1f}  R2={res['r2']:.3f}",
+                 fontsize=11, fontweight='bold', color=c)
     ax.legend(fontsize=7, loc='upper left')
 
 for j in range(n_res, len(axes.flatten())):
     axes.flatten()[j].set_visible(False)
 plt.tight_layout(rect=[0,0,1,0.96])
-chart_path = f'{OUT_DIR}/p5_da_predict.png'
+chart_path = f'{OUT_DIR}/p5_dryseason_eval.png'
 plt.savefig(chart_path, dpi=150, bbox_inches='tight')
 print(f"  Chart saved: {chart_path}", flush=True)
 
