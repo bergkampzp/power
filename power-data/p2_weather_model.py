@@ -85,9 +85,7 @@ gen_fc_96 = pd.read_sql("SELECT forecast_date as date_key, period, forecast_mw a
 gen_fc_96['hour'] = gen_fc_96['period'].str[:2].astype(int)
 # ⚠️ 时效性同上
 
-load_fc_96 = pd.read_sql("SELECT trade_date as td, period, forecast_load as load_fc FROM load_forecast WHERE region='云南'", conn)
-# ⚠️ 时效性: load_forecast无publish_date字段，建议改进: ETL增加publish_date或shift 1天
-load_fc_96['date_key'] = load_fc_96['td'].str.replace('-', '')
+load_fc_96 = pd.read_sql("SELECT date_key, period, load as load_fc FROM hourly_load WHERE region='云南'", conn)
 load_fc_96['hour'] = load_fc_96['period'].str[:2].astype(int)
 
 section = pd.read_sql("SELECT trade_date, section_name, limit_value, period FROM section_constraint", conn)
