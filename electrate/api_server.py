@@ -79,6 +79,28 @@ def api_manual_sync():
 def api_sync_status():
     with _dpconn() as c:
         return jsonify(_orchestrator.get_status(c))
+
+from data_pull import pairing as _pairing
+
+@app.route('/api/admin/pairing-token', methods=['POST'])
+@require_super
+def api_pairing_token():
+    with _dpconn() as c:
+        return jsonify({"token": _pairing.generate_token(c)})
+
+@app.route('/api/extension/cookie', methods=['POST'])
+def api_extension_cookie():
+    body = request.get_json(force=True) or {}
+    token = body.get('token', '')
+    cookie = body.get('cookie', '')
+    with _dpconn() as c:
+        if not _pairing.verify_token(c, token):
+            return jsonify({"error": "bad_token"}), 401
+        if 'CAMSID' not in cookie:
+            return jsonify({"error": "expect_camsid"}), 400
+        _cookie_store.set_cookie(c, cookie)
+    _orchestrator.trigger_sync(DB_PATH)
+    return jsonify({"ok": True})
 # ── end auto data-pull routes ───────────────────────────────────────────────
 
 

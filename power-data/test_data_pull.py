@@ -153,6 +153,31 @@ def test_init_super_cli_importable():
     from data_pull import init_super
     assert hasattr(init_super, 'main')
 
+def test_extension_cookie_endpoint():
+    import sys, os, sqlite3
+    os.environ['DATA_PULL_KEY'] = 'k'
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'electrate'))
+    import importlib, api_server
+    importlib.reload(api_server)
+    from data_pull import pairing as _pair
+    from data_pull.schema import ensure_schema as _es4
+    from data_pull.cookie_store import get_cookie as _gc
+    api_server.app.config['TESTING'] = True
+    cli = api_server.app.test_client()
+    with sqlite3.connect(api_server.DB_PATH) as c:
+        _es4(c); tok = _pair.generate_token(c)
+    # wrong token → 401
+    r = cli.post('/api/extension/cookie', json={"token":"bad","cookie":"CAMSID=1"})
+    assert r.status_code == 401, f"expected 401 got {r.status_code}"
+    # non-CAMSID cookie → 400
+    r = cli.post('/api/extension/cookie', json={"token":tok,"cookie":"FOO=1"})
+    assert r.status_code == 400, f"expected 400 got {r.status_code}"
+    # valid token + CAMSID → 200 + stored
+    r = cli.post('/api/extension/cookie', json={"token":tok,"cookie":"CAMSID=abc"})
+    assert r.status_code == 200, f"expected 200 got {r.status_code}"
+    with sqlite3.connect(api_server.DB_PATH) as c:
+        assert _gc(c) == "CAMSID=abc"
+
 if __name__ == "__main__":
     import sys
     try:
@@ -250,4 +275,10 @@ if __name__ == "__main__":
         print("PASS test_init_super_cli_importable")
     except Exception as e:
         print(f"FAIL test_init_super_cli_importable: {e}")
+        sys.exit(1)
+    try:
+        test_extension_cookie_endpoint()
+        print("PASS test_extension_cookie_endpoint")
+    except Exception as e:
+        print(f"FAIL test_extension_cookie_endpoint: {e}")
         sys.exit(1)
