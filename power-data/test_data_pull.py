@@ -107,6 +107,17 @@ def test_get_status_shape():
     st = _orch.get_status(c)
     assert {'in_progress','cookie_valid','last_run'} <= set(st.keys())
 
+from data_pull import auth as _auth
+from data_pull.schema import ensure_schema as _es2
+import sqlite3 as _sq3c
+
+def test_create_and_verify_user():
+    c = _sq3c.connect(":memory:"); _es2(c)
+    _auth.create_super(c, "admin", "secret")
+    assert _auth.verify(c, "admin", "secret") is True
+    assert _auth.verify(c, "admin", "wrong") is False
+    assert _auth.verify(c, "nouser", "secret") is False
+
 if __name__ == "__main__":
     import sys
     try:
@@ -180,4 +191,10 @@ if __name__ == "__main__":
         print("PASS test_get_status_shape")
     except Exception as e:
         print(f"FAIL test_get_status_shape: {e}")
+        sys.exit(1)
+    try:
+        test_create_and_verify_user()
+        print("PASS test_create_and_verify_user")
+    except Exception as e:
+        print(f"FAIL test_create_and_verify_user: {e}")
         sys.exit(1)
