@@ -18,6 +18,7 @@ import {
   PieChartOutlined,
 } from '@ant-design/icons'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
+import SyncStatusBar from './SyncStatusBar'
 
 const { Header, Sider, Content } = AntLayout
 
@@ -227,6 +228,7 @@ export default function Layout() {
           </div>
         </Header>
         <Content style={{ padding: 16, background: '#141414' }}>
+          <SyncStatusBar />
           <Outlet />
         </Content>
         <div

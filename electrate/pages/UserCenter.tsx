@@ -1,4 +1,5 @@
-import { Card, Row, Col, Button, Tag } from 'antd'
+import { useState } from 'react'
+import { Card, Row, Col, Button, Tag, Input, message } from 'antd'
 import { UserOutlined, SettingOutlined, ShopOutlined } from '@ant-design/icons'
 
 const userCards = [
@@ -6,6 +7,50 @@ const userCards = [
   { title: '售电公司', subtitle: '备用账户', status: 'inactive' },
   { title: '售电公司', subtitle: '测试账户', status: 'inactive' },
 ]
+
+function CookiePanel() {
+  const [c, setC] = useState('');
+
+  const save = async () => {
+    const r = await fetch('/api/admin/cookie', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cookie: c }),
+    });
+    if (r.ok) {
+      message.success('已保存并触发更新');
+    } else {
+      message.error('保存失败（需超级用户登录）');
+    }
+  };
+
+  const refresh = async () => {
+    await fetch('/api/admin/sync', { method: 'POST' });
+    message.info('已触发刷新');
+  };
+
+  return (
+    <div style={{ marginTop: 24, padding: 16, background: '#f9f9f9', borderRadius: 8 }}>
+      <p style={{ fontWeight: 600, marginBottom: 8 }}>数据同步（超级用户专用）</p>
+      <p style={{ color: '#666', marginBottom: 8 }}>
+        平台会话 Cookie — 从浏览器登录 spot.poweremarket.com 后，
+        打开开发者工具复制 CAMSID 的值粘贴到此处：
+      </p>
+      <Input.TextArea
+        rows={2}
+        value={c}
+        onChange={e => setC(e.target.value)}
+        placeholder="CAMSID=..."
+      />
+      <Button type="primary" onClick={save} style={{ marginTop: 8, marginRight: 8 }}>
+        保存 Cookie
+      </Button>
+      <Button onClick={refresh} style={{ marginTop: 8 }}>
+        立即刷新
+      </Button>
+    </div>
+  );
+}
 
 export default function UserCenter() {
   return (
@@ -80,6 +125,9 @@ export default function UserCenter() {
           </Col>
         ))}
       </Row>
+
+      {/* 数据同步面板 */}
+      <CookiePanel />
 
       {/* 功能模块 */}
       <Row gutter={[16, 16]} style={{ marginTop: 24 }}>
