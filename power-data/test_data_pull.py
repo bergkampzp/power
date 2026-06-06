@@ -89,6 +89,24 @@ def test_weather_sync_signature():
     assert hasattr(_ws, 'sync_weather_incremental')
     assert 'conn' in _ins.signature(_ws.sync_weather_incremental).parameters
 
+from data_pull import orchestrator as _orch
+from data_pull.schema import ensure_schema as _es
+import sqlite3 as _sq3b, os as _os2
+
+def test_orchestrator_lock_prevents_concurrent():
+    _os2.environ['DATA_PULL_KEY'] = 'k'
+    _orch._reset_lock_for_test()
+    assert _orch._try_acquire() is True
+    assert _orch._try_acquire() is False
+    _orch._release()
+    assert _orch._try_acquire() is True
+    _orch._release()
+
+def test_get_status_shape():
+    c = _sq3b.connect(":memory:"); _es(c)
+    st = _orch.get_status(c)
+    assert {'in_progress','cookie_valid','last_run'} <= set(st.keys())
+
 if __name__ == "__main__":
     import sys
     try:
@@ -150,4 +168,16 @@ if __name__ == "__main__":
         print("PASS test_weather_sync_signature")
     except Exception as e:
         print(f"FAIL test_weather_sync_signature: {e}")
+        sys.exit(1)
+    try:
+        test_orchestrator_lock_prevents_concurrent()
+        print("PASS test_orchestrator_lock_prevents_concurrent")
+    except Exception as e:
+        print(f"FAIL test_orchestrator_lock_prevents_concurrent: {e}")
+        sys.exit(1)
+    try:
+        test_get_status_shape()
+        print("PASS test_get_status_shape")
+    except Exception as e:
+        print(f"FAIL test_get_status_shape: {e}")
         sys.exit(1)
