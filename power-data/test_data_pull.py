@@ -118,6 +118,22 @@ def test_create_and_verify_user():
     assert _auth.verify(c, "admin", "wrong") is False
     assert _auth.verify(c, "nouser", "secret") is False
 
+def test_flask_routes():
+    import sys, os
+    os.environ['DATA_PULL_KEY'] = 'k'
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'electrate'))
+    import importlib
+    import api_server
+    importlib.reload(api_server)
+    api_server.app.config['TESTING'] = True
+    cli = api_server.app.test_client()
+    # admin route requires auth — must return 401 without login
+    r = cli.post('/api/admin/cookie', json={"cookie":"x"})
+    assert r.status_code in (401, 403), f"expected 401/403, got {r.status_code}"
+    # sync status is public
+    r2 = cli.get('/api/sync/status')
+    assert r2.status_code == 200, f"expected 200, got {r2.status_code}"
+
 if __name__ == "__main__":
     import sys
     try:
@@ -197,4 +213,10 @@ if __name__ == "__main__":
         print("PASS test_create_and_verify_user")
     except Exception as e:
         print(f"FAIL test_create_and_verify_user: {e}")
+        sys.exit(1)
+    try:
+        test_flask_routes()
+        print("PASS test_flask_routes")
+    except Exception as e:
+        print(f"FAIL test_flask_routes: {e}")
         sys.exit(1)

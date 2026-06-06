@@ -23,6 +23,65 @@ def get_db_connection():
     return conn
 
 
+# ── Auto data-pull: super-user auth + sync routes ──────────────────────────
+import sys as _sys, functools
+_sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'power-data'))
+from flask import session
+from data_pull.schema import ensure_schema as _ensure_schema
+from data_pull import auth as _auth, cookie_store as _cookie_store, orchestrator as _orchestrator
+
+app.secret_key = os.environ.get('FLASK_SECRET', 'dev-secret-change-me')
+
+def _dpconn():
+    return sqlite3.connect(DB_PATH)
+
+# Initialise schema on startup (idempotent)
+with _dpconn() as _c:
+    _ensure_schema(_c)
+
+def require_super(fn):
+    @functools.wraps(fn)
+    def _w(*a, **k):
+        if not session.get('is_super'):
+            return jsonify({"error": "unauthorized"}), 401
+        return fn(*a, **k)
+    return _w
+
+@app.route('/api/login', methods=['POST'])
+def api_login():
+    body = request.get_json(force=True) or {}
+    with _dpconn() as c:
+        if _auth.verify(c, body.get('username', ''), body.get('password', '')):
+            session['is_super'] = True
+            _orchestrator.trigger_sync(DB_PATH)
+            return jsonify({"ok": True, "sync": "started"})
+    return jsonify({"error": "bad_credentials"}), 401
+
+@app.route('/api/logout', methods=['POST'])
+def api_logout():
+    session.clear()
+    return jsonify({"ok": True})
+
+@app.route('/api/admin/cookie', methods=['POST'])
+@require_super
+def api_set_cookie():
+    with _dpconn() as c:
+        _cookie_store.set_cookie(c, (request.get_json(force=True) or {}).get('cookie', ''))
+    _orchestrator.trigger_sync(DB_PATH)
+    return jsonify({"ok": True})
+
+@app.route('/api/admin/sync', methods=['POST'])
+@require_super
+def api_manual_sync():
+    return jsonify(_orchestrator.trigger_sync(DB_PATH))
+
+@app.route('/api/sync/status', methods=['GET'])
+def api_sync_status():
+    with _dpconn() as c:
+        return jsonify(_orchestrator.get_status(c))
+# ── end auto data-pull routes ───────────────────────────────────────────────
+
+
 @app.route('/api/health', methods=['GET'])
 def health_check():
     """健康检查接口"""
