@@ -134,6 +134,10 @@ def test_flask_routes():
     r2 = cli.get('/api/sync/status')
     assert r2.status_code == 200, f"expected 200, got {r2.status_code}"
 
+def test_init_super_cli_importable():
+    from data_pull import init_super
+    assert hasattr(init_super, 'main')
+
 if __name__ == "__main__":
     import sys
     try:
@@ -219,4 +223,10 @@ if __name__ == "__main__":
         print("PASS test_flask_routes")
     except Exception as e:
         print(f"FAIL test_flask_routes: {e}")
+        sys.exit(1)
+    try:
+        test_init_super_cli_importable()
+        print("PASS test_init_super_cli_importable")
+    except Exception as e:
+        print(f"FAIL test_init_super_cli_importable: {e}")
         sys.exit(1)
