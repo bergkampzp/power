@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "云南电价数据同步",
+  "version": "1.0.0",
+  "description": "监听南方电力交易系统登录，自动同步 CAMSID 到数据服务",
+  "permissions": ["cookies", "storage", "alarms"],
+  "host_permissions": [
+    "https://spot.poweremarket.com/*",
+    "https://BACKEND_ORIGIN/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "options_page": "options.html"
+}
