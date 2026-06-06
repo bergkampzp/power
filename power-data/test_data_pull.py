@@ -9,6 +9,15 @@ def test_ensure_schema_creates_tables():
     # idempotent: calling again must not raise
     ensure_schema(c)
 
+from data_pull.crypto_util import encrypt, decrypt
+
+def test_crypto_round_trip():
+    import os
+    os.environ['DATA_PULL_KEY'] = 'test-key-please-change'
+    token = encrypt("CAMSID=abc123")
+    assert token != "CAMSID=abc123"          # must be encrypted
+    assert decrypt(token) == "CAMSID=abc123"  # must round-trip
+
 if __name__ == "__main__":
     import sys
     try:
@@ -16,4 +25,10 @@ if __name__ == "__main__":
         print("PASS test_ensure_schema_creates_tables")
     except Exception as e:
         print(f"FAIL: {e}")
+        sys.exit(1)
+    try:
+        test_crypto_round_trip()
+        print("PASS test_crypto_round_trip")
+    except Exception as e:
+        print(f"FAIL test_crypto_round_trip: {e}")
         sys.exit(1)
