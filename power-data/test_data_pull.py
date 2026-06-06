@@ -82,6 +82,13 @@ def test_sync_incremental_auth_expired():
         raised = True
     assert raised, "should have raised AuthExpired"
 
+from data_pull import weather_sync as _ws
+import inspect as _ins
+
+def test_weather_sync_signature():
+    assert hasattr(_ws, 'sync_weather_incremental')
+    assert 'conn' in _ins.signature(_ws.sync_weather_incremental).parameters
+
 if __name__ == "__main__":
     import sys
     try:
@@ -137,4 +144,10 @@ if __name__ == "__main__":
         print("PASS test_sync_incremental_auth_expired")
     except Exception as e:
         print(f"FAIL test_sync_incremental_auth_expired: {e}")
+        sys.exit(1)
+    try:
+        test_weather_sync_signature()
+        print("PASS test_weather_sync_signature")
+    except Exception as e:
+        print(f"FAIL test_weather_sync_signature: {e}")
         sys.exit(1)
