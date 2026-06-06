@@ -1068,10 +1068,14 @@ def api_extension_cookie():
 }
 ```
 
-- [ ] **Step 2: background.js（cookie 变化 + 定时兜底，自动推送）**
+- [ ] **Step 2: background.js（登录即推送 + 23小时兜底）**
+
+策略：CAMSID 按 1 天有效期设计；**每次用户登录南方 → 扩展立即推送一次**（`cookies.onChanged`）。
+定时器改为 23 小时兜底（防止当天未登录时 cookie 默默续期，不依赖高频轮询）。
 
 ```javascript
 const PLATFORM_URL = "https://spot.poweremarket.com";
+
 async function pushCookie() {
   const cfg = await chrome.storage.local.get(["backendUrl", "token"]);
   if (!cfg.backendUrl || !cfg.token) return;
@@ -1082,13 +1086,27 @@ async function pushCookie() {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ token: cfg.token, cookie: "CAMSID=" + ck.value })
     });
-  } catch (e) {}
+  } catch (e) { /* 网络失败，下次登录重推 */ }
 }
+
+// 主触发：用户登录南方时 CAMSID 被写入 → 立即推送
 chrome.cookies.onChanged.addListener((info) => {
-  if (info.cookie.name === "CAMSID" && info.cookie.domain.includes("poweremarket.com") && !info.removed) pushCookie();
+  if (
+    info.cookie.name === "CAMSID" &&
+    info.cookie.domain.includes("poweremarket.com") &&
+    !info.removed
+  ) {
+    pushCookie();
+  }
 });
-chrome.runtime.onInstalled.addListener(() => { chrome.alarms.create("repush", { periodInMinutes: 30 }); pushCookie(); });
-chrome.alarms.onAlarm.addListener((a) => { if (a.name === "repush") pushCookie(); });
+
+// 兜底：每 23 小时推一次（CAMSID 按 1 天有效期，防漏推）
+chrome.runtime.onInstalled.addListener(() => {
+  chrome.alarms.create("daily_push", { periodInMinutes: 23 * 60 });
+});
+chrome.alarms.onAlarm.addListener((a) => {
+  if (a.name === "daily_push") pushCookie();
+});
 ```
 
 - [ ] **Step 3: options.html / options.js（一次性配置后端地址+令牌）**
@@ -1119,13 +1137,17 @@ $("test").onclick = async () => {
 - [ ] **Step 4: 手动验证**
 
 ```
-1) 改 manifest 的 BACKEND_ORIGIN 为实际后端域
-2) Chrome→扩展→加载已解压扩展→选 electrate/extension/
-3) Web 超级用户登录→设置页"生成配对令牌"→复制
-4) 扩展 options 填后端地址+令牌→保存
-5) 浏览器登录 spot.poweremarket.com
-6) 期望: 扩展自动推送→状态条"更新中…"→"已更新至 X"
-7) 退出南方重登(cookie 续期)→扩展自动再推, 无需手动
+# 一次性配置（所有操作均在本地 Chrome 完成）
+1) 改 manifest.json 的 BACKEND_ORIGIN 为实际后端域名
+2) Chrome → 扩展管理 (chrome://extensions) → 开启"开发者模式"
+   → "加载已解压的扩展程序" → 选择 electrate/extension/ 目录
+3) Web 超级用户登录 → 设置页点"生成配对令牌" → 复制令牌
+4) 扩展图标右键 → 选项 → 填写后端地址 + 令牌 → 保存
+
+# 日常验证（每次登录南方）
+5) 在同一浏览器登录 spot.poweremarket.com
+6) 期望: 扩展自动推送 → Web 状态条显示"更新中…" → "已更新至 YYYY-MM-DD"
+7) 明天再次登录南方 → 自动获取新 CAMSID → 再次同步 → 无任何手动操作
 ```
 
 - [ ] **Step 5: 提交** — `git add electrate/extension/ && git commit -m "feat(extension): MV3 cookie auto-capture & push"`
