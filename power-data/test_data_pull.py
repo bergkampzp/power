@@ -134,6 +134,21 @@ def test_flask_routes():
     r2 = cli.get('/api/sync/status')
     assert r2.status_code == 200, f"expected 200, got {r2.status_code}"
 
+from data_pull.pairing import generate_token, verify_token
+from data_pull.schema import ensure_schema as _es3
+import sqlite3 as _sq3d, os as _os3
+
+def test_pairing_token():
+    _os3.environ['DATA_PULL_KEY'] = 'k'
+    c = _sq3d.connect(":memory:"); _es3(c)
+    tok = generate_token(c)
+    assert tok and len(tok) >= 16
+    assert verify_token(c, tok) is True
+    assert verify_token(c, "wrong") is False
+    tok2 = generate_token(c)
+    assert verify_token(c, tok) is False, "old token should be invalid after reset"
+    assert verify_token(c, tok2) is True
+
 def test_init_super_cli_importable():
     from data_pull import init_super
     assert hasattr(init_super, 'main')
@@ -223,6 +238,12 @@ if __name__ == "__main__":
         print("PASS test_flask_routes")
     except Exception as e:
         print(f"FAIL test_flask_routes: {e}")
+        sys.exit(1)
+    try:
+        test_pairing_token()
+        print("PASS test_pairing_token")
+    except Exception as e:
+        print(f"FAIL test_pairing_token: {e}")
         sys.exit(1)
     try:
         test_init_super_cli_importable()
