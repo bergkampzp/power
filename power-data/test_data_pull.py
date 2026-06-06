@@ -53,6 +53,35 @@ def test_sync_all_exports():
     for s in sync_all.SOURCES:
         assert 'label' in s and 'table' in s and 'fetch' in s and 'insert' in s
 
+from data_pull.sync_engine import sync_incremental
+from data_pull.incremental import AuthExpired
+import sqlite3 as _sq3
+
+def _seed_da_table(c):
+    c.execute("CREATE TABLE IF NOT EXISTS day_ahead_node_price_96(trade_date TEXT, region TEXT, node_name TEXT, period TEXT, price REAL)")
+    c.commit()
+
+def test_sync_incremental_inserts():
+    c = _sq3.connect(":memory:"); _seed_da_table(c)
+    sources = [{"label":"DA","table":"day_ahead_node_price_96","date_col":"trade_date",
+                "fetch": lambda cookie,d: {"data":{"data":[{"ok":1}]}},
+                "insert": lambda conn,d,resp: conn.execute(
+                    "INSERT INTO day_ahead_node_price_96 VALUES(?,?,?,?,?)",(d,'云南','__avg__','00:00',100.0))}]
+    rep = sync_incremental("CAMSID=x", c, today="20260102", sources=sources, lookback_days=1, default_start="20260101")
+    assert rep["DA"]["rows_added"] >= 1
+
+def test_sync_incremental_auth_expired():
+    c = _sq3.connect(":memory:"); _seed_da_table(c)
+    sources = [{"label":"DA","table":"day_ahead_node_price_96","date_col":"trade_date",
+                "fetch": lambda cookie,d: {"code":"401"},
+                "insert": lambda conn,d,resp: None}]
+    raised = False
+    try:
+        sync_incremental("bad", c, today="20260101", sources=sources, lookback_days=1, default_start="20260101")
+    except AuthExpired:
+        raised = True
+    assert raised, "should have raised AuthExpired"
+
 if __name__ == "__main__":
     import sys
     try:
@@ -96,4 +125,16 @@ if __name__ == "__main__":
         print("PASS test_sync_all_exports")
     except Exception as e:
         print(f"FAIL test_sync_all_exports: {e}")
+        sys.exit(1)
+    try:
+        test_sync_incremental_inserts()
+        print("PASS test_sync_incremental_inserts")
+    except Exception as e:
+        print(f"FAIL test_sync_incremental_inserts: {e}")
+        sys.exit(1)
+    try:
+        test_sync_incremental_auth_expired()
+        print("PASS test_sync_incremental_auth_expired")
+    except Exception as e:
+        print(f"FAIL test_sync_incremental_auth_expired: {e}")
         sys.exit(1)
