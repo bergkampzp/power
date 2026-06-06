@@ -1,107 +1,100 @@
-# 自动数据拉取功能 — 设计文档 (Spec)
+# 自动数据拉取功能 — 产品 & 技术设计文档 (Spec v2 · 简化版)
 
-**日期**: 2026-06-05 ｜ **状态**: 待用户审阅
-**目标**: 把当前"手动粘贴 cookie → 手动跑脚本拉取日前电价等数据"的流程，改为"用户登录 electrate 后自动增量补齐必要数据"。
+**日期**: 2026-06-05 ｜ **状态**: 待审阅 → 任务拆分
+**目标**: 把"手动粘贴 cookie → 手动跑脚本拉取日前电价等数据"，改为"**超级用户**登录后自动增量补齐数据；其他客户只读浏览"。
+
+> v2 变更：**取消多用户凭证隔离**。改为**单一超级用户**持有唯一平台 cookie、负责更新数据；其余客户只浏览。认证与凭证大幅简化。
 
 ---
 
-## 1. 已锁定的决策（来自 brainstorm）
+# 第一部分 · 产品文档（@产品经理）
+
+## 1. 角色与权限
+
+| 角色 | 能做什么 | 认证 |
+|---|---|---|
+| **超级用户（运营管理员，唯一）** | 粘贴/更新平台 cookie；触发/手动刷新数据拉取；查看同步状态 | 需登录（账号密码） |
+| **普通客户（浏览者）** | 只读浏览电价/预测/图表 | 无需登录（应用内只读） |
+
+唯一一份云南公共数据，全体客户共享浏览；只有超级用户能写入/刷新。
+
+## 2. 关键用户流程
+
+**A. 超级用户更新数据**
+1. 超级用户登录 → 系统**自动后台增量补齐**（检查"上次拉到哪天"→拉缺失日期，异步不阻塞）。
+2. 顶部状态条显示：更新中… / 已更新至 X 日 / cookie 失效请更新。
+3. cookie 失效时 → 去设置页粘贴新 cookie（含"如何从浏览器获取 CAMSID"指引）→ 自动重试。
+4. 可点"立即刷新"手动触发。
+
+**B. 普通客户浏览**
+- 打开应用即看最新已入库数据；不触发任何拉取；看不到 cookie/同步管理入口。
+
+## 3. 验收标准
+- 超级用户登录后无需任何手动脚本，数据自动补齐到最新可得日期。
+- cookie 过期有明确提示与重新录入入口；录入后能恢复拉取。
+- 天气源（无需 cookie）始终可刷新。
+- 普通客户全程只读，无写入/管理能力。
+- 拉取过程不阻塞界面；状态可见。
+
+## 4. 范围边界（YAGNI）
+不做：多用户/多租户、按用户分库、cron 定时、平台自动登录/验证码、找回密码/SSO。
+
+---
+
+# 第二部分 · 技术文档（@技术架构师）
+
+## 5. 已锁定决策
 
 | 维度 | 决策 |
 |---|---|
-| 认证模型 | **半自动 cookie**：用户提供一次平台会话 cookie(CAMSID)，系统在有效期内自动拉取，过期提醒重新提供。不做平台自动登录/验证码。 |
-| 触发时机 | **登录即触发（增量补齐）**：用户登录 electrate 时后台异步检查"上次拉到哪天"并补齐缺失日期。不做 cron。 |
-| 数据范围 | **共享同一份云南数据**：每个云南客户数据相同 → 单一共享 DB（`power_market_v2.db`），不按用户分库。 |
-| 凭证范围 | **每用户独立 cookie**：每个用户带自己的平台账号 cookie（凭证隔离），但拉回的是同一份公共数据写入共享 DB；任一有效 cookie 即可刷新，互为兜底。 |
-| 拉取内容 | `sync_all.py` 覆盖的全部源（日前电价/实时/统调负荷/负荷预测/非市场/新能源出力+预测/水电出力+预测/发电总出力 等）+ 天气源(`weather_forecast_fetch.py`)。 |
-| 实现方式 | **A：Flask 后端内置后台线程** + 重构 `sync_all.py` 为可导入模块 + 同步锁 + 状态表。 |
-| 鉴权范围 | **本功能内做最小用户名密码登录**（小而有界、接口可替换）。*[默认决策，待用户确认]* |
+| 认证 | 半自动 cookie：超级用户提供一次平台 cookie，有效期内自动拉取，过期提醒。 |
+| 触发 | 超级用户**登录即触发增量补齐** + 手动"立即刷新"。普通客户浏览不触发。 |
+| 数据 | 单一共享 DB（`power_market_v2.db`），全体共享，不分库。 |
+| 凭证 | **单一全局 cookie**（超级用户持有），加密存储。 |
+| 拉取内容 | `sync_all.py` 全部源 + 天气源（`weather_forecast_fetch.py`）。 |
+| 实现 | Flask 后端内置后台线程 + 重构 `sync_all` 为可导入模块 + 同步锁 + 状态表。 |
 
----
-
-## 2. 架构总览
+## 6. 架构总览
 
 ```
-登录 → POST /api/login → [后台线程] sync_orchestrator ──┬─ sync_engine(用户cookie) → 共享DB
-                              (全局锁 + 新鲜度判断)      └─ weather_sync(无cookie)   → 共享DB
-前端轮询 GET /api/sync/status ← sync_status 表
-设置页 POST /api/credentials/cookie → credential_store(加密)
+超级用户登录/刷新 → POST /api/admin/sync → [后台线程] orchestrator ─┬─ sync_engine(全局cookie) → 共享DB
+                                  (全局锁 + 新鲜度判断)            └─ weather_sync(无cookie)  → 共享DB
+任何人 → GET /api/sync/status ← sync_status 表
+超级用户 → POST /api/admin/cookie → cookie_store(加密)
+普通客户 → 现有只读 /api/* 数据接口
 ```
 
-新增/改动集中在 `electrate/` 后端 + `power-data/` 的脚本重构；共享 DB 增加几张小表。
+## 7. 组件（单一职责 + 接口）
 
----
+1. **auth（最小，单超级用户）**：`users(id, username, pwd_hash, role)`，初期仅 1 个 `role=super` 账号（密码哈希，werkzeug）；`POST /api/login`、`/api/logout`、服务端会话；管理接口加 `@require_super` 装饰器。
+2. **cookie_store（单值）**：表 `app_config(key, value_enc, status, updated_at)`，键 `platform_cookie`；接口 `set_cookie(c)`/`get_cookie()`/`mark_invalid()`；对称加密(Fernet)，密钥来自环境变量 `DATA_PULL_KEY`（不入仓）；日志脱敏。
+3. **sync_engine（重构 `sync_all.py`）**：`sync_incremental(cookie, conn, lookback_days=K) -> SyncReport`；用 `tables=[(table,date_col,label)]` 求每源最新日期→拉 `[最新-(K-1)..今天]`；检测 cookie 失效（跳登录/401/302/空）抛 `AuthExpired`；返回每源 `{rows_added,date_range,status,error?}`。
+4. **weather_sync**：包 `weather_forecast_fetch` live，无 cookie，始终可刷，带 `publish_date` 入库。
+5. **sync_orchestrator**：`trigger_sync()`：抢**全局内存锁**（已在跑→返回状态）→新鲜度判断（已最新则跳市场）→取全局 cookie→后台线程跑 engine+weather→`AuthExpired` 则 `mark_invalid`→写 `sync_status`/`sync_runs`。
+6. **endpoints**：`POST /api/login`（超级用户登录→异步 `trigger_sync`）、`POST /api/admin/cookie`（@super，粘贴 cookie，可立即触发）、`POST /api/admin/sync`（@super，手动刷新）、`GET /api/sync/status`（公开）。
+7. **前端**：超级用户登录页；设置页 cookie 录入+有效性指示+CAMSID 获取指引+"立即刷新"按钮；顶部同步状态条；普通客户视图隐藏管理入口。
 
-## 3. 组件（单一职责 + 接口）
+## 8. 数据流
+超级用户登录 → `/api/login`（验证、会话）→ `trigger_sync()`[后台] → 锁→新鲜度→取 cookie → `sync_engine` 拉缺失（写共享 DB）+ `weather_sync` → 写状态 → 释放锁。前端轮询 `/api/sync/status`。cookie 失效 → UI 提示 → 设置页录入 → 重触发。
 
-1. **auth**（新，最小）：`users(id, username, pwd_hash, created_at)`；`POST /api/login` / `POST /api/logout`；服务端会话。密码哈希（werkzeug）。仅为获得 `user_id`，刻意保持最小、可替换。
-2. **credential_store**：表 `user_credentials(user_id, cookie_enc, status, updated_at)`；接口 `set_cookie(user_id, cookie)` / `get_cookie(user_id)` / `mark_invalid(user_id)` / `latest_valid_cookie()`。cookie 用对称加密(Fernet)存储，密钥来自环境变量 `DATA_PULL_KEY`，**不入库不入仓**；日志不打印 cookie 值。
-3. **sync_engine**（重构 `sync_all.py`）：`sync_incremental(cookie, conn, sources=ALL, lookback_days=K) -> SyncReport`。
-   - 用 `sync_all` 的 `tables=[(table, date_col, label)]` 清单，对每源求库内最新日期 → 拉取 `[最新-(K-1) .. 今天]`（回拉 K 天容纳修订）。
-   - 检测 cookie 失效（响应跳登录页 / HTTP 401/302 / data 为空且无电价）→ 抛 `AuthExpired`。
-   - 返回报告：每源 `{rows_added, date_range, status, error?}`。
-4. **weather_sync**（包 `weather_forecast_fetch`）：`sync_weather_incremental(conn)`；调 Open-Meteo forecast(live)，无 cookie，始终可刷；带 `publish_date` 入库（gate-legal）。
-5. **sync_orchestrator**：`trigger_sync(user_id)`：
-   - 抢**全局内存锁**（仅允许一个同步在跑）；已在跑 → 返回当前状态。
-   - **新鲜度判断**：若市场数据已到期望最新（如日前已到次日）→ 跳过市场拉取。
-   - 取该用户 cookie；无/失效 → 记录"需 cookie"，仍执行 weather_sync。
-   - 后台线程跑 engine + weather；`AuthExpired` → `mark_invalid` + 状态置 `cookie_invalid`。
-   - 写 `sync_status`（汇总）与 `sync_runs`（逐次日志）。
-6. **endpoints**：
-   - `POST /api/login`：验证 → 建会话 → **异步** `trigger_sync(user)` → 返回"同步已启动"。
-   - `POST /api/credentials/cookie`：保存该用户 cookie（设置页粘贴）→ 可选立即触发。
-   - `GET /api/sync/status`：返回 `{in_progress, last_run, per_source_latest, cookie_valid, errors}`。
-7. **前端**：登录页（复用 `UserCenter` 壳）；设置页 cookie 粘贴框 + 有效性指示 + "如何从浏览器获取 CAMSID"指引；顶部同步状态条（更新中 / 已更新至 X / cookie 失效请更新）。
+## 9. 错误处理
+- cookie 失效 → `AuthExpired` → 标记无效、状态 `cookie_invalid`、UI 提示重录；天气仍拉。
+- 并发 → 全局锁，第二者返回 `in_progress`。
+- 分源失败 → 记录并继续（部分成功）。
+- 重启中断 → 锁随重启释放；`sync_runs` 标记未完成；下次触发幂等（`INSERT OR REPLACE`+增量）。
+- 限流/网络 → 复用 `sync_all` 随机延时 + 重试。
 
----
+## 10. 安全
+cookie 加密存储（密钥环境变量，不入仓）；密码哈希；日志不打印 cookie；管理接口 `@require_super`；SQLite 单写由同步锁串行化。
 
-## 4. 数据流
+## 11. 测试
+- 单元：cookie 加解密往返；增量区间计算（mock 最新日→缺失区间）；`AuthExpired` 检测；新鲜度判断；锁防并发；`@require_super` 拦截。
+- 集成：engine 对临时 DB（打桩 `api_post`）→入库；失效路径→标记无效；普通客户访问管理接口被拒。
+- 手动：超级用户登录→自动增量；过期→录入恢复；普通客户只读。
 
-登录 → `/api/login`（验证、建会话）→ `orchestrator.trigger_sync(user)`[后台] → 抢锁 → 新鲜度判断 → 取 cookie → `sync_engine` 拉缺失（市场，写共享 DB）+ `weather_sync` → 更新 `sync_status`/`sync_runs` → 释放锁。前端轮询 `/api/sync/status` 显示进度/结果。cookie 失效 → UI 提示去设置页粘贴新 cookie → `/api/credentials/cookie` → 重新触发。
-
----
-
-## 5. 错误处理
-
-- **cookie 失效** → `AuthExpired` → 标记无效、状态 `cookie_invalid`、UI 提示该用户重粘贴；天气仍拉取；其他用户有效 cookie 仍能刷。
-- **并发触发** → 全局锁；第二者返回 `in_progress`。
-- **分源失败** → 该源记录错误，其余继续（部分成功）。
-- **重启中断** → 内存锁随重启释放；`sync_runs` 标记未完成；下次登录重新触发（`INSERT OR REPLACE` + 增量，幂等）。
-- **限流/网络** → 复用 `sync_all` 随机延时 + 增加重试。
-- **无有效 cookie 且数据陈旧** → 不刷新；UI 显示"数据截至 X，需有效 cookie 更新"。
-
----
-
-## 6. 安全
-
-- cookie 对称加密存储（密钥来自环境变量，不入仓）；日志脱敏不打印 cookie。
-- 密码哈希存储。
-- SQLite 单写：同步锁同时充当写串行化。
-
----
-
-## 7. 范围边界（YAGNI）
-
-- 不做 cron（仅登录触发）。
-- 不做按用户分库（数据共享）。
-- 不做平台自动登录/验证码。
-- 鉴权只做最小用户名密码（不做 OAuth/SSO/找回密码等）。
-- 复用现有脚本，重构最小化（`sync_all` → 可导入；`weather_forecast_fetch` 已可用）。
-
----
-
-## 8. 测试
-
-- **单元**：cookie 加解密往返；增量区间计算（给定各表最新日 → 预期缺失区间）；`AuthExpired` 检测（mock 响应）；新鲜度判断；锁防并发。
-- **集成**：`sync_engine` 对临时 DB（打桩 `api_post`）→ 入库；失效路径 → 标记无效；编排器并发 → 第二者得 `in_progress`。
-- **手动**：真实登录 + 粘贴 cookie → 观察增量拉取与状态条。
-
----
-
-## 9. 受影响 / 新增文件（预估）
-
-- 重构：`power-data/sync_all.py` → 抽出可导入的 `sync_incremental` + 抽离硬编码 cookie。
-- 新增：`power-data/sync_service.py`（credential_store + orchestrator + 锁/状态），或置于 `electrate/` 后端。
-- 改动：`electrate/api_server.py`（login / credentials / sync status 路由 + 登录触发）。
-- 前端：登录页、设置页 cookie 录入、状态条（`electrate/` TSX）。
-- DB：新增表 `users` / `user_credentials` / `sync_status` / `sync_runs`。
+## 12. 受影响 / 新增文件（预估）
+- 重构 `power-data/sync_all.py` → 可导入 `sync_incremental` + 去硬编码 cookie。
+- 新增 `power-data/sync_service.py`（cookie_store + orchestrator + 锁 + 状态）。
+- 改 `electrate/api_server.py`（login / admin cookie / admin sync / sync status + 登录触发 + `@require_super`）。
+- 前端：登录页、设置页（cookie 录入 + 刷新）、状态条、管理入口权限控制（`electrate/` TSX）。
+- DB 新增表：`users`、`app_config`、`sync_status`、`sync_runs`。
