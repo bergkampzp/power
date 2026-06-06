@@ -32,6 +32,19 @@ def test_cookie_store():
     mark_invalid(c)
     assert c.execute("SELECT status FROM app_config WHERE key='platform_cookie'").fetchone()[0] == 'invalid'
 
+from data_pull.incremental import missing_range, AuthExpired, is_auth_expired
+
+def test_missing_range_basic():
+    assert missing_range("20260601", "20260605", lookback_days=2) == ("20260531", "20260605")
+
+def test_missing_range_empty_table():
+    assert missing_range(None, "20260605", lookback_days=2, default_start="20251201") == ("20251201", "20260605")
+
+def test_is_auth_expired_detects():
+    assert is_auth_expired({"code": "401"}) is True
+    assert is_auth_expired({"data": {"data": []}}) is True
+    assert is_auth_expired({"data": {"data": [{"x": 1}]}}) is False
+
 if __name__ == "__main__":
     import sys
     try:
@@ -51,4 +64,22 @@ if __name__ == "__main__":
         print("PASS test_cookie_store")
     except Exception as e:
         print(f"FAIL test_cookie_store: {e}")
+        sys.exit(1)
+    try:
+        test_missing_range_basic()
+        print("PASS test_missing_range_basic")
+    except Exception as e:
+        print(f"FAIL test_missing_range_basic: {e}")
+        sys.exit(1)
+    try:
+        test_missing_range_empty_table()
+        print("PASS test_missing_range_empty_table")
+    except Exception as e:
+        print(f"FAIL test_missing_range_empty_table: {e}")
+        sys.exit(1)
+    try:
+        test_is_auth_expired_detects()
+        print("PASS test_is_auth_expired_detects")
+    except Exception as e:
+        print(f"FAIL test_is_auth_expired_detects: {e}")
         sys.exit(1)
