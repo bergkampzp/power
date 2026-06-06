@@ -18,6 +18,20 @@ def test_crypto_round_trip():
     assert token != "CAMSID=abc123"          # must be encrypted
     assert decrypt(token) == "CAMSID=abc123"  # must round-trip
 
+from data_pull.cookie_store import set_cookie, get_cookie, mark_invalid
+import os
+
+def test_cookie_store():
+    os.environ['DATA_PULL_KEY'] = 'k'
+    c = sqlite3.connect(":memory:"); ensure_schema(c)
+    assert get_cookie(c) is None
+    set_cookie(c, "CAMSID=xyz")
+    assert get_cookie(c) == "CAMSID=xyz"            # decrypted plaintext
+    row = c.execute("SELECT value_enc FROM app_config WHERE key='platform_cookie'").fetchone()
+    assert row[0] != "CAMSID=xyz"                   # stored as ciphertext
+    mark_invalid(c)
+    assert c.execute("SELECT status FROM app_config WHERE key='platform_cookie'").fetchone()[0] == 'invalid'
+
 if __name__ == "__main__":
     import sys
     try:
@@ -31,4 +45,10 @@ if __name__ == "__main__":
         print("PASS test_crypto_round_trip")
     except Exception as e:
         print(f"FAIL test_crypto_round_trip: {e}")
+        sys.exit(1)
+    try:
+        test_cookie_store()
+        print("PASS test_cookie_store")
+    except Exception as e:
+        print(f"FAIL test_cookie_store: {e}")
         sys.exit(1)
