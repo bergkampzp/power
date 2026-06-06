@@ -45,6 +45,14 @@ def test_is_auth_expired_detects():
     assert is_auth_expired({"data": {"data": []}}) is True
     assert is_auth_expired({"data": {"data": [{"x": 1}]}}) is False
 
+import sync_all, inspect
+
+def test_sync_all_exports():
+    assert 'cookie' in inspect.signature(sync_all.api_post).parameters
+    assert hasattr(sync_all, 'SOURCES') and len(sync_all.SOURCES) >= 5
+    for s in sync_all.SOURCES:
+        assert 'label' in s and 'table' in s and 'fetch' in s and 'insert' in s
+
 if __name__ == "__main__":
     import sys
     try:
@@ -82,4 +90,10 @@ if __name__ == "__main__":
         print("PASS test_is_auth_expired_detects")
     except Exception as e:
         print(f"FAIL test_is_auth_expired_detects: {e}")
+        sys.exit(1)
+    try:
+        test_sync_all_exports()
+        print("PASS test_sync_all_exports")
+    except Exception as e:
+        print(f"FAIL test_sync_all_exports: {e}")
         sys.exit(1)
