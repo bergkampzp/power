@@ -937,3 +937,202 @@ Expected: 全部 PASS
 - **覆盖**：角色/权限(Task 9,10,12)、cookie 半自动(Task 2,3,10,12)、登录触发增量(Task 6,8,10)、共享库(全程单库)、全量源+天气(Task 5,6,7)、错误处理(Task 6 AuthExpired / Task 8 锁/失效)、安全(Task 2 加密/Task 9 哈希/Task 10 require_super)、测试(各 Task)。
 - **占位符**：无 TODO/TBD；每步含可运行代码与命令。
 - **类型/命名一致**：`api_post(...,cookie)`、`SOURCES`、`sync_incremental`、`trigger_sync(db_path)`、`get_status(conn)`、`require_super` 跨任务一致。
+
+---
+
+# v3 增量任务：云端浏览器扩展自动捕获 cookie
+
+## Task 13: 配对令牌（pairing token）存取
+
+**Files:** Create `power-data/data_pull/pairing.py`；Test `power-data/test_data_pull.py`
+
+- [ ] **Step 1: 写失败测试**
+
+```python
+from data_pull.pairing import generate_token, verify_token
+from data_pull.schema import ensure_schema
+import sqlite3, os
+def test_pairing_token():
+    os.environ['DATA_PULL_KEY'] = 'k'
+    c = sqlite3.connect(":memory:"); ensure_schema(c)
+    tok = generate_token(c)
+    assert tok and len(tok) >= 16
+    assert verify_token(c, tok) is True
+    assert verify_token(c, "wrong") is False
+    tok2 = generate_token(c)
+    assert verify_token(c, tok) is False and verify_token(c, tok2) is True
+```
+
+- [ ] **Step 2: 运行验证失败** — `cd power-data && python -c "from test_data_pull import test_pairing_token as t; t()"` → FAIL ModuleNotFoundError
+
+- [ ] **Step 3: 实现**
+
+```python
+# data_pull/pairing.py
+import secrets
+from datetime import datetime
+from .crypto_util import encrypt, decrypt
+KEY = 'pairing_token'
+def generate_token(conn) -> str:
+    tok = secrets.token_urlsafe(24)
+    conn.execute("""INSERT INTO app_config(key,value_enc,status,updated_at) VALUES(?,?,?,?)
+                    ON CONFLICT(key) DO UPDATE SET value_enc=excluded.value_enc,
+                      status='valid', updated_at=excluded.updated_at""",
+                 (KEY, encrypt(tok), 'valid', datetime.now().isoformat(timespec='seconds')))
+    conn.commit(); return tok
+def verify_token(conn, token: str) -> bool:
+    row = conn.execute("SELECT value_enc FROM app_config WHERE key=?", (KEY,)).fetchone()
+    if not row or not token: return False
+    try: return secrets.compare_digest(decrypt(row[0]), token)
+    except Exception: return False
+```
+
+- [ ] **Step 4: 运行验证通过** — 同 Step 2 命令 → 退出码 0
+- [ ] **Step 5: 提交** — `git add power-data/data_pull/pairing.py power-data/test_data_pull.py && git commit -m "feat(data_pull): pairing token for extension auth"`
+
+---
+
+## Task 14: 扩展端点 /api/extension/cookie + /api/admin/pairing-token
+
+**Files:** Modify `electrate/api_server.py`；Test `power-data/test_data_pull.py`
+
+- [ ] **Step 1: 写失败测试**
+
+```python
+def test_extension_cookie_endpoint():
+    import os, sys, sqlite3
+    os.environ['DATA_PULL_KEY']='k'
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'electrate'))
+    import api_server
+    from data_pull import pairing
+    from data_pull.schema import ensure_schema
+    from data_pull.cookie_store import get_cookie
+    api_server.app.config['TESTING'] = True
+    cli = api_server.app.test_client()
+    with sqlite3.connect(api_server.DB_PATH) as c:
+        ensure_schema(c); tok = pairing.generate_token(c)
+    assert cli.post('/api/extension/cookie', json={"token":"bad","cookie":"CAMSID=1"}).status_code == 401
+    assert cli.post('/api/extension/cookie', json={"token":tok,"cookie":"FOO=1"}).status_code == 400
+    assert cli.post('/api/extension/cookie', json={"token":tok,"cookie":"CAMSID=abc"}).status_code == 200
+    with sqlite3.connect(api_server.DB_PATH) as c:
+        assert get_cookie(c) == "CAMSID=abc"
+```
+
+- [ ] **Step 2: 运行验证失败** — `cd power-data && python -c "from test_data_pull import test_extension_cookie_endpoint as t; t()"` → FAIL (404)
+
+- [ ] **Step 3: 实现**（追加到 `api_server.py`）
+
+```python
+from data_pull import pairing
+
+@app.route('/api/admin/pairing-token', methods=['POST'])
+@require_super
+def api_pairing_token():
+    with _conn() as c:
+        return jsonify({"token": pairing.generate_token(c)})
+
+@app.route('/api/extension/cookie', methods=['POST'])
+def api_extension_cookie():
+    body = request.get_json(force=True)
+    token = body.get('token',''); cookie = body.get('cookie','')
+    with _conn() as c:
+        if not pairing.verify_token(c, token):
+            return jsonify({"error":"bad_token"}), 401
+        if 'CAMSID' not in cookie:
+            return jsonify({"error":"expect_camsid"}), 400
+        cookie_store.set_cookie(c, cookie)
+    orchestrator.trigger_sync(DB_PATH)
+    return jsonify({"ok": True})
+```
+
+- [ ] **Step 4: 运行验证通过** — 同 Step 2 命令 → 退出码 0
+- [ ] **Step 5: 提交** — `git add electrate/api_server.py power-data/test_data_pull.py && git commit -m "feat(api): extension cookie endpoint + pairing-token"`
+
+---
+
+## Task 15: 浏览器扩展（MV3，手动验证）
+
+**Files:** Create `electrate/extension/{manifest.json,background.js,options.html,options.js}`
+
+- [ ] **Step 1: manifest**（部署时把 `BACKEND_ORIGIN` 换成实际后端域）
+
+```json
+{
+  "manifest_version": 3,
+  "name": "云南电价数据同步",
+  "version": "1.0.0",
+  "permissions": ["cookies", "storage", "alarms"],
+  "host_permissions": ["https://spot.poweremarket.com/*", "https://BACKEND_ORIGIN/*"],
+  "background": { "service_worker": "background.js" },
+  "options_page": "options.html"
+}
+```
+
+- [ ] **Step 2: background.js（cookie 变化 + 定时兜底，自动推送）**
+
+```javascript
+const PLATFORM_URL = "https://spot.poweremarket.com";
+async function pushCookie() {
+  const cfg = await chrome.storage.local.get(["backendUrl", "token"]);
+  if (!cfg.backendUrl || !cfg.token) return;
+  const ck = await chrome.cookies.get({ url: PLATFORM_URL, name: "CAMSID" });
+  if (!ck) return;
+  try {
+    await fetch(cfg.backendUrl.replace(/\/$/, "") + "/api/extension/cookie", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: cfg.token, cookie: "CAMSID=" + ck.value })
+    });
+  } catch (e) {}
+}
+chrome.cookies.onChanged.addListener((info) => {
+  if (info.cookie.name === "CAMSID" && info.cookie.domain.includes("poweremarket.com") && !info.removed) pushCookie();
+});
+chrome.runtime.onInstalled.addListener(() => { chrome.alarms.create("repush", { periodInMinutes: 30 }); pushCookie(); });
+chrome.alarms.onAlarm.addListener((a) => { if (a.name === "repush") pushCookie(); });
+```
+
+- [ ] **Step 3: options.html / options.js（一次性配置后端地址+令牌）**
+
+```html
+<!doctype html><meta charset="utf-8">
+<h3>数据同步扩展设置</h3>
+<p>后端地址：<input id="url" size="40" placeholder="https://你的后端域"></p>
+<p>配对令牌：<input id="tok" size="40" placeholder="从 Web 设置页生成"></p>
+<button id="save">保存</button> <button id="test">立即推送一次</button><p id="msg"></p>
+<script src="options.js"></script>
+```
+```javascript
+const $ = (id) => document.getElementById(id);
+chrome.storage.local.get(["backendUrl","token"]).then(c => { $("url").value=c.backendUrl||""; $("tok").value=c.token||""; });
+$("save").onclick = async () => { await chrome.storage.local.set({ backendUrl: $("url").value.trim(), token: $("tok").value.trim() }); $("msg").textContent = "已保存"; };
+$("test").onclick = async () => {
+  const cfg = await chrome.storage.local.get(["backendUrl","token"]);
+  const ck = await chrome.cookies.get({ url: "https://spot.poweremarket.com", name: "CAMSID" });
+  if (!ck) { $("msg").textContent = "未检测到 CAMSID，请先登录 spot.poweremarket.com"; return; }
+  const r = await fetch(cfg.backendUrl.replace(/\/$/,"")+"/api/extension/cookie", {
+    method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({ token: cfg.token, cookie:"CAMSID="+ck.value }) });
+  $("msg").textContent = r.ok ? "推送成功，已触发同步" : ("推送失败 " + r.status);
+};
+```
+
+- [ ] **Step 4: 手动验证**
+
+```
+1) 改 manifest 的 BACKEND_ORIGIN 为实际后端域
+2) Chrome→扩展→加载已解压扩展→选 electrate/extension/
+3) Web 超级用户登录→设置页"生成配对令牌"→复制
+4) 扩展 options 填后端地址+令牌→保存
+5) 浏览器登录 spot.poweremarket.com
+6) 期望: 扩展自动推送→状态条"更新中…"→"已更新至 X"
+7) 退出南方重登(cookie 续期)→扩展自动再推, 无需手动
+```
+
+- [ ] **Step 5: 提交** — `git add electrate/extension/ && git commit -m "feat(extension): MV3 cookie auto-capture & push"`
+
+---
+
+## v3 自检
+- **覆盖**：跨域(Task13-15 扩展解决)、令牌认证(Task13,14)、自动捕获+续期(Task15 onChanged+alarm)、HttpOnly(chrome.cookies API)、手动粘贴兜底(Task10 保留)。
+- **占位符**：仅 `BACKEND_ORIGIN` 为部署期替换值，已说明。
+- **一致性**：`/api/extension/cookie`、`pairing.generate_token/verify_token`、`cookie_store.set_cookie`、`orchestrator.trigger_sync` 跨任务一致。
